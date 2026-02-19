@@ -1,6 +1,10 @@
 import { DNSQueryLog, DNSStats, DNSRecordType } from './dns-types';
 import { hasRedisConfig, getRedis } from './redis';
 
+function hasKVConfig(): boolean {
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
 class MemoryStatsManager {
   private logs: DNSQueryLog[] = [];
   private readonly MAX_LOGS = 1000;
@@ -75,7 +79,7 @@ class MemoryStatsManager {
   }
 }
 
-const REDIS_KEYS = {
+const STORAGE_KEYS = {
   LOGS: 'dns:logs',
   TOTAL_QUERIES: 'dns:total_queries',
   CACHE_HITS: 'dns:cache_hits',
@@ -88,31 +92,199 @@ const REDIS_KEYS = {
 
 const MAX_LOGS = 1000;
 
+class KVStatsManager {
+  private kv: any = null;
+
+  private async getKV() {
+    if (!this.kv) {
+      const mod = await import('@vercel/kv');
+      this.kv = mod.kv;
+    }
+    return this.kv;
+  }
+
+  async logQuery(log: DNSQueryLog): Promise<void> {
+    try {
+      const kv = await this.getKV();
+      const pipeline = kv.pipeline();
+
+      pipeline.lpush(STORAGE_KEYS.LOGS, JSON.stringify(log));
+      pipeline.ltrim(STORAGE_KEYS.LOGS, 0, MAX_LOGS - 1);
+
+      pipeline.incr(STORAGE_KEYS.TOTAL_QUERIES);
+      if (log.cached) pipeline.incr(STORAGE_KEYS.CACHE_HITS);
+      if (log.status === 'success') {
+        pipeline.incrbyfloat(STORAGE_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
+        pipeline.incr(STORAGE_KEYS.SUCCESS_COUNT);
+      }
+
+      pipeline.incr(`${STORAGE_KEYS.TYPE_PREFIX}${log.type}`);
+
+      if (log.upstream) {
+        const upstreamKey = `${STORAGE_KEYS.UPSTREAM_PREFIX}${log.upstream}`;
+        pipeline.hincrby(upstreamKey, 'queries', 1);
+        pipeline.hincrbyfloat(upstreamKey, 'totalTime', log.responseTime);
+      }
+
+      pipeline.setnx(STORAGE_KEYS.START_TIME, Date.now().toString());
+
+      await pipeline.exec();
+    } catch (error) {
+      console.error('[dns-stats] KV logQuery error:', error);
+    }
+  }
+
+  async getStats(): Promise<DNSStats> {
+    try {
+      const kv = await this.getKV();
+
+      const [
+        totalQueriesRaw,
+        cacheHitsRaw,
+        totalResponseTimeRaw,
+        successCountRaw,
+        startTimeRaw,
+        recentLogsRaw,
+      ] = await Promise.all([
+        kv.get(STORAGE_KEYS.TOTAL_QUERIES),
+        kv.get(STORAGE_KEYS.CACHE_HITS),
+        kv.get(STORAGE_KEYS.TOTAL_RESPONSE_TIME),
+        kv.get(STORAGE_KEYS.SUCCESS_COUNT),
+        kv.get(STORAGE_KEYS.START_TIME),
+        kv.lrange(STORAGE_KEYS.LOGS, 0, 49),
+      ]);
+
+      const totalQueries = Number(totalQueriesRaw) || 0;
+      const cacheHits = Number(cacheHitsRaw) || 0;
+      const totalResponseTime = Number(totalResponseTimeRaw) || 0;
+      const successCount = Number(successCountRaw) || 0;
+      const startTime = Number(startTimeRaw) || Date.now();
+
+      const avgResponseTime = successCount > 0 ? totalResponseTime / successCount : 0;
+      const uptimeMinutes = (Date.now() - startTime) / 1000 / 60;
+      const queriesPerMinute = uptimeMinutes > 0 ? totalQueries / uptimeMinutes : 0;
+
+      const upstreamKeys = await kv.keys(`${STORAGE_KEYS.UPSTREAM_PREFIX}*`);
+      const upstreamServers = await Promise.all(
+        (upstreamKeys as string[]).map(async (key: string) => {
+          const data = await kv.hgetall(key);
+          const name = key.replace(STORAGE_KEYS.UPSTREAM_PREFIX, '');
+          return {
+            name,
+            queries: Number(data?.queries) || 0,
+            avgResponseTime: data?.queries
+              ? Number(data.totalTime) / Number(data.queries)
+              : 0,
+          };
+        })
+      );
+
+      const typeKeys = await kv.keys(`${STORAGE_KEYS.TYPE_PREFIX}*`);
+      const typeEntries = await Promise.all(
+        (typeKeys as string[]).map(async (key: string) => {
+          const count = await kv.get(key);
+          const type = key.replace(STORAGE_KEYS.TYPE_PREFIX, '') as DNSRecordType;
+          return [type, Number(count) || 0] as const;
+        })
+      );
+      const queryTypeDistribution = Object.fromEntries(typeEntries) as Record<DNSRecordType, number>;
+
+      const recentQueries: DNSQueryLog[] = (recentLogsRaw as string[]).map((raw) => {
+        try {
+          return typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+
+      return {
+        totalQueries,
+        cacheHitRate: totalQueries > 0 ? (cacheHits / totalQueries) * 100 : 0,
+        averageResponseTime: avgResponseTime,
+        queriesPerMinute,
+        upstreamServers,
+        queryTypeDistribution,
+        recentQueries,
+      };
+    } catch (error) {
+      console.error('[dns-stats] KV getStats error:', error);
+      return {
+        totalQueries: 0,
+        cacheHitRate: 0,
+        averageResponseTime: 0,
+        queriesPerMinute: 0,
+        upstreamServers: [],
+        queryTypeDistribution: {} as Record<DNSRecordType, number>,
+        recentQueries: [],
+      };
+    }
+  }
+
+  async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
+    try {
+      const kv = await this.getKV();
+      const raw = await kv.lrange(STORAGE_KEYS.LOGS, offset, offset + limit - 1);
+      return (raw as string[]).map((item) => {
+        try {
+          return typeof item === 'string' ? JSON.parse(item) : item;
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+    } catch (error) {
+      console.error('[dns-stats] KV getLogs error:', error);
+      return [];
+    }
+  }
+
+  async getUptime(): Promise<number> {
+    try {
+      const kv = await this.getKV();
+      const startTime = await kv.get(STORAGE_KEYS.START_TIME);
+      return startTime ? Date.now() - Number(startTime) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const kv = await this.getKV();
+      const keys = await kv.keys('dns:*');
+      if (keys.length > 0) {
+        await kv.del(...keys);
+      }
+    } catch (error) {
+      console.error('[dns-stats] KV clear error:', error);
+    }
+  }
+}
+
 class RedisStatsManager {
   async logQuery(log: DNSQueryLog): Promise<void> {
     try {
       const redis = getRedis();
       const pipeline = redis.pipeline();
 
-      pipeline.lpush(REDIS_KEYS.LOGS, JSON.stringify(log));
-      pipeline.ltrim(REDIS_KEYS.LOGS, 0, MAX_LOGS - 1);
+      pipeline.lpush(STORAGE_KEYS.LOGS, JSON.stringify(log));
+      pipeline.ltrim(STORAGE_KEYS.LOGS, 0, MAX_LOGS - 1);
 
-      pipeline.incr(REDIS_KEYS.TOTAL_QUERIES);
-      if (log.cached) pipeline.incr(REDIS_KEYS.CACHE_HITS);
+      pipeline.incr(STORAGE_KEYS.TOTAL_QUERIES);
+      if (log.cached) pipeline.incr(STORAGE_KEYS.CACHE_HITS);
       if (log.status === 'success') {
-        pipeline.incrby(REDIS_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
-        pipeline.incr(REDIS_KEYS.SUCCESS_COUNT);
+        pipeline.incrby(STORAGE_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
+        pipeline.incr(STORAGE_KEYS.SUCCESS_COUNT);
       }
 
-      pipeline.incr(`${REDIS_KEYS.TYPE_PREFIX}${log.type}`);
+      pipeline.incr(`${STORAGE_KEYS.TYPE_PREFIX}${log.type}`);
 
       if (log.upstream) {
-        const upstreamKey = `${REDIS_KEYS.UPSTREAM_PREFIX}${log.upstream}`;
+        const upstreamKey = `${STORAGE_KEYS.UPSTREAM_PREFIX}${log.upstream}`;
         pipeline.hincrby(upstreamKey, 'queries', 1);
         pipeline.hincrby(upstreamKey, 'totalTime', log.responseTime);
       }
 
-      pipeline.setnx(REDIS_KEYS.START_TIME, Date.now().toString());
+      pipeline.setnx(STORAGE_KEYS.START_TIME, Date.now().toString());
 
       await pipeline.exec();
     } catch (error) {
@@ -132,12 +304,12 @@ class RedisStatsManager {
         startTimeRaw,
         recentLogsRaw,
       ] = await Promise.all([
-        redis.get(REDIS_KEYS.TOTAL_QUERIES),
-        redis.get(REDIS_KEYS.CACHE_HITS),
-        redis.get(REDIS_KEYS.TOTAL_RESPONSE_TIME),
-        redis.get(REDIS_KEYS.SUCCESS_COUNT),
-        redis.get(REDIS_KEYS.START_TIME),
-        redis.lrange(REDIS_KEYS.LOGS, 0, 49),
+        redis.get(STORAGE_KEYS.TOTAL_QUERIES),
+        redis.get(STORAGE_KEYS.CACHE_HITS),
+        redis.get(STORAGE_KEYS.TOTAL_RESPONSE_TIME),
+        redis.get(STORAGE_KEYS.SUCCESS_COUNT),
+        redis.get(STORAGE_KEYS.START_TIME),
+        redis.lrange(STORAGE_KEYS.LOGS, 0, 49),
       ]);
 
       const totalQueries = Number(totalQueriesRaw) || 0;
@@ -150,11 +322,11 @@ class RedisStatsManager {
       const uptimeMinutes = (Date.now() - startTime) / 1000 / 60;
       const queriesPerMinute = uptimeMinutes > 0 ? totalQueries / uptimeMinutes : 0;
 
-      const upstreamKeys = await redis.keys(`${REDIS_KEYS.UPSTREAM_PREFIX}*`);
+      const upstreamKeys = await redis.keys(`${STORAGE_KEYS.UPSTREAM_PREFIX}*`);
       const upstreamServers = await Promise.all(
         upstreamKeys.map(async (key: string) => {
           const data = await redis.hgetall(key);
-          const name = key.replace(REDIS_KEYS.UPSTREAM_PREFIX, '');
+          const name = key.replace(STORAGE_KEYS.UPSTREAM_PREFIX, '');
           return {
             name,
             queries: Number(data?.queries) || 0,
@@ -165,11 +337,11 @@ class RedisStatsManager {
         })
       );
 
-      const typeKeys = await redis.keys(`${REDIS_KEYS.TYPE_PREFIX}*`);
+      const typeKeys = await redis.keys(`${STORAGE_KEYS.TYPE_PREFIX}*`);
       const typeEntries = await Promise.all(
         typeKeys.map(async (key: string) => {
           const count = await redis.get(key);
-          const type = key.replace(REDIS_KEYS.TYPE_PREFIX, '') as DNSRecordType;
+          const type = key.replace(STORAGE_KEYS.TYPE_PREFIX, '') as DNSRecordType;
           return [type, Number(count) || 0] as const;
         })
       );
@@ -209,7 +381,7 @@ class RedisStatsManager {
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
     try {
       const redis = getRedis();
-      const raw = await redis.lrange(REDIS_KEYS.LOGS, offset, offset + limit - 1);
+      const raw = await redis.lrange(STORAGE_KEYS.LOGS, offset, offset + limit - 1);
       return raw.map((item) => {
         try {
           return typeof item === 'string' ? JSON.parse(item) : item;
@@ -226,7 +398,7 @@ class RedisStatsManager {
   async getUptime(): Promise<number> {
     try {
       const redis = getRedis();
-      const startTime = await redis.get(REDIS_KEYS.START_TIME);
+      const startTime = await redis.get(STORAGE_KEYS.START_TIME);
       return startTime ? Date.now() - Number(startTime) : 0;
     } catch {
       return 0;
@@ -246,16 +418,26 @@ class RedisStatsManager {
   }
 }
 
+type StorageType = 'kv' | 'redis' | 'memory';
+
 class DNSStatsProxy {
   private memory = new MemoryStatsManager();
+  private kvManager = new KVStatsManager();
   private redisManager = new RedisStatsManager();
 
-  private useRedis(): boolean {
-    return hasRedisConfig();
+  private getStorageType(): StorageType {
+    if (hasKVConfig()) return 'kv';
+    if (hasRedisConfig()) return 'redis';
+    return 'memory';
   }
 
   logQuery(log: DNSQueryLog): void {
-    if (this.useRedis()) {
+    const type = this.getStorageType();
+    if (type === 'kv') {
+      this.kvManager.logQuery(log).catch((e) =>
+        console.error('[dns-stats] async logQuery failed:', e)
+      );
+    } else if (type === 'redis') {
       this.redisManager.logQuery(log).catch((e) =>
         console.error('[dns-stats] async logQuery failed:', e)
       );
@@ -265,28 +447,40 @@ class DNSStatsProxy {
   }
 
   async getStats(): Promise<DNSStats> {
-    if (this.useRedis()) {
+    const type = this.getStorageType();
+    if (type === 'kv') {
+      return this.kvManager.getStats();
+    } else if (type === 'redis') {
       return this.redisManager.getStats();
     }
     return this.memory.getStats();
   }
 
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
-    if (this.useRedis()) {
+    const type = this.getStorageType();
+    if (type === 'kv') {
+      return this.kvManager.getLogs(limit, offset);
+    } else if (type === 'redis') {
       return this.redisManager.getLogs(limit, offset);
     }
     return this.memory.getLogs(limit, offset);
   }
 
   async getUptime(): Promise<number> {
-    if (this.useRedis()) {
+    const type = this.getStorageType();
+    if (type === 'kv') {
+      return this.kvManager.getUptime();
+    } else if (type === 'redis') {
       return this.redisManager.getUptime();
     }
     return this.memory.getUptime();
   }
 
   async clear(): Promise<void> {
-    if (this.useRedis()) {
+    const type = this.getStorageType();
+    if (type === 'kv') {
+      return this.kvManager.clear();
+    } else if (type === 'redis') {
       return this.redisManager.clear();
     }
     this.memory.clear();

@@ -1,9 +1,6 @@
-const AUTH_USERNAME = process.env.AUTH_USERNAME || 'admin';
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'admin123';
+import { settingsStore } from './settings-store';
 
-export function validateCredentials(username: string, password: string): boolean {
-  return username === AUTH_USERNAME && password === AUTH_PASSWORD;
-}
+export { settingsStore };
 
 export function setAuthToken() {
   if (typeof window !== 'undefined') {

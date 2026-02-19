@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateCredentials } from '@/lib/auth';
+import { settingsStore } from '@/lib/settings-store';
 
 export async function POST(request: NextRequest) {
   try {
+    await settingsStore.initialize();
+
     const { username, password } = await request.json();
 
     if (!username || !password) {
@@ -12,7 +14,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (validateCredentials(username, password)) {
+    if (settingsStore.validateCredentials(username, password)) {
       return NextResponse.json({
         success: true,
         message: '登录成功',
@@ -24,6 +26,7 @@ export async function POST(request: NextRequest) {
       );
     }
   } catch (error) {
+    console.error('[auth API] Error:', error);
     return NextResponse.json(
       { error: '登录失败' },
       { status: 500 }

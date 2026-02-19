@@ -88,33 +88,33 @@ export function DNSQueryTool() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
       {/* 查询表单 */}
       <Card className="border-blue-100 shadow-md">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-blue-900">
-            <Search className="w-5 h-5" />
+        <CardHeader className="p-3 sm:p-4 sm:pb-3">
+          <CardTitle className="flex items-center gap-2 text-blue-900 text-sm sm:text-base">
+            <Search className="w-4 h-4 sm:w-5 sm:h-5" />
             DNS查询工具
           </CardTitle>
-          <CardDescription>测试DoH服务的域名解析功能</CardDescription>
+          <CardDescription className="text-xs sm:text-sm">测试DoH服务的域名解析功能</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="domain" className="text-blue-900">域名</Label>
+        <CardContent className="space-y-3 sm:space-y-4 p-3 sm:p-4 pt-0">
+          <div className="space-y-1.5 sm:space-y-2">
+            <Label htmlFor="domain" className="text-blue-900 text-xs sm:text-sm">域名</Label>
             <Input
               id="domain"
               placeholder="例如: example.com"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleQuery()}
-              className="border-blue-200 focus:ring-blue-500"
+              className="border-blue-200 focus:ring-blue-500 h-9 sm:h-10"
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="type" className="text-blue-900">记录类型</Label>
+          <div className="space-y-1.5 sm:space-y-2">
+            <Label htmlFor="type" className="text-blue-900 text-xs sm:text-sm">记录类型</Label>
             <Select value={recordType} onValueChange={setRecordType}>
-              <SelectTrigger id="type" className="border-blue-200">
+              <SelectTrigger id="type" className="border-blue-200 h-9 sm:h-10">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -138,7 +138,7 @@ export function DNSQueryTool() {
               onChange={(e) => setUseCache(e.target.checked)}
               className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
             />
-            <Label htmlFor="useCache" className="text-blue-900 cursor-pointer">
+            <Label htmlFor="useCache" className="text-blue-900 cursor-pointer text-xs sm:text-sm">
               使用缓存（更快的查询速度）
             </Label>
           </div>
@@ -146,7 +146,7 @@ export function DNSQueryTool() {
           <Button
             onClick={handleQuery}
             disabled={loading || !domain.trim()}
-            className="w-full bg-blue-500 hover:bg-blue-600"
+            className="w-full bg-blue-500 hover:bg-blue-600 h-9 sm:h-10"
           >
             {loading ? (
               <>
@@ -165,31 +165,31 @@ export function DNSQueryTool() {
 
       {/* 查询结果 */}
       <Card className="border-blue-100 shadow-md">
-        <CardHeader>
-          <CardTitle className="text-blue-900">查询结果</CardTitle>
-          <CardDescription>DNS解析详细信息</CardDescription>
+        <CardHeader className="p-3 sm:p-4 sm:pb-3">
+          <CardTitle className="text-blue-900 text-sm sm:text-base">查询结果</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">DNS解析详细信息</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-3 sm:p-4 pt-0">
           {!result && (
-            <div className="flex flex-col items-center justify-center py-12 text-blue-400">
-              <Globe className="w-16 h-16 mb-4 opacity-50" />
-              <p className="text-sm">输入域名并点击查询按钮开始测试</p>
+            <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-blue-400">
+              <Globe className="w-12 h-12 sm:w-16 sm:h-16 mb-3 sm:mb-4 opacity-50" />
+              <p className="text-xs sm:text-sm">输入域名并点击查询按钮开始测试</p>
             </div>
           )}
 
           {result && (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {/* 状态指示器 */}
               <div className="flex items-center gap-2">
                 {result.success ? (
                   <>
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                    <span className="font-medium text-green-700">查询成功</span>
+                    <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
+                    <span className="font-medium text-green-700 text-sm sm:text-base">查询成功</span>
                   </>
                 ) : (
                   <>
-                    <XCircle className="w-5 h-5 text-red-500" />
-                    <span className="font-medium text-red-700">查询失败</span>
+                    <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
+                    <span className="font-medium text-red-700 text-sm sm:text-base">查询失败</span>
                   </>
                 )}
               </div>
@@ -197,35 +197,35 @@ export function DNSQueryTool() {
               <Separator />
 
               {/* 查询信息 */}
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-blue-600">域名:</span>
-                  <span className="font-medium text-blue-900">{result.domain}</span>
+                  <span className="text-xs sm:text-sm text-blue-600">域名:</span>
+                  <span className="font-medium text-blue-900 text-xs sm:text-sm truncate ml-2">{result.domain}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-blue-600">类型:</span>
-                  <Badge variant="outline">{result.type}</Badge>
+                  <span className="text-xs sm:text-sm text-blue-600">类型:</span>
+                  <Badge variant="outline" className="text-xs">{result.type}</Badge>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-blue-600 flex items-center gap-1">
+                  <span className="text-xs sm:text-sm text-blue-600 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     响应时间:
                   </span>
-                  <Badge variant="secondary">{result.responseTime}ms</Badge>
+                  <Badge variant="secondary" className="text-xs">{result.responseTime}ms</Badge>
                 </div>
                 {result.cached && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-blue-600 flex items-center gap-1">
+                    <span className="text-xs sm:text-sm text-blue-600 flex items-center gap-1">
                       <Database className="w-3 h-3" />
                       缓存状态:
                     </span>
-                    <Badge className="bg-green-100 text-green-700">从缓存返回</Badge>
+                    <Badge className="bg-green-100 text-green-700 text-xs">从缓存返回</Badge>
                   </div>
                 )}
                 {result.upstream && (
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-blue-600">上游服务器:</span>
-                    <span className="font-medium text-blue-900">{result.upstream}</span>
+                    <span className="text-xs sm:text-sm text-blue-600">上游服务器:</span>
+                    <span className="font-medium text-blue-900 text-xs truncate ml-2">{result.upstream}</span>
                   </div>
                 )}
               </div>
@@ -235,14 +235,14 @@ export function DNSQueryTool() {
               {/* 解析结果 */}
               {result.success && result.answers.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="font-medium text-blue-900">解析结果:</h4>
+                  <h4 className="font-medium text-blue-900 text-xs sm:text-sm">解析结果:</h4>
                   <div className="space-y-2">
                     {result.answers.map((answer, index) => (
                       <div
                         key={index}
-                        className="p-3 bg-blue-50 rounded-lg border border-blue-100"
+                        className="p-2 sm:p-3 bg-blue-50 rounded-lg border border-blue-100"
                       >
-                        <p className="text-sm font-mono text-blue-900 break-all">
+                        <p className="text-xs sm:text-sm font-mono text-blue-900 break-all">
                           {formatAnswer(answer)}
                         </p>
                       </div>
@@ -253,7 +253,7 @@ export function DNSQueryTool() {
 
               {result.success && result.answers.length === 0 && (
                 <Alert>
-                  <AlertDescription>
+                  <AlertDescription className="text-xs sm:text-sm">
                     未找到 {result.type} 记录
                   </AlertDescription>
                 </Alert>
@@ -262,7 +262,7 @@ export function DNSQueryTool() {
               {/* 错误信息 */}
               {!result.success && result.error && (
                 <Alert variant="destructive">
-                  <AlertDescription>{result.error}</AlertDescription>
+                  <AlertDescription className="text-xs sm:text-sm">{result.error}</AlertDescription>
                 </Alert>
               )}
             </div>
@@ -272,31 +272,31 @@ export function DNSQueryTool() {
 
       {/* 使用说明 */}
       <Card className="border-blue-100 shadow-md lg:col-span-2">
-        <CardHeader>
-          <CardTitle className="text-blue-900">使用说明</CardTitle>
+        <CardHeader className="p-3 sm:p-4 sm:pb-3">
+          <CardTitle className="text-blue-900 text-sm sm:text-base">使用说明</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid md:grid-cols-2 gap-4">
+        <CardContent className="space-y-3 sm:space-y-4 p-3 sm:p-4 pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             <div className="space-y-2">
-              <h4 className="font-medium text-blue-900">常用记录类型:</h4>
-              <ul className="text-sm text-blue-700 space-y-1">
-                <li><strong>A</strong> - 返回IPv4地址（如 192.0.2.1）</li>
+              <h4 className="font-medium text-blue-900 text-xs sm:text-sm">常用记录类型:</h4>
+              <ul className="text-xs sm:text-sm text-blue-700 space-y-1">
+                <li><strong>A</strong> - 返回IPv4地址</li>
                 <li><strong>AAAA</strong> - 返回IPv6地址</li>
                 <li><strong>CNAME</strong> - 域名别名记录</li>
                 <li><strong>MX</strong> - 邮件服务器记录</li>
-                <li><strong>TXT</strong> - 文本记录（SPF、DKIM等）</li>
+                <li><strong>TXT</strong> - 文本记录</li>
               </ul>
             </div>
             <div className="space-y-2">
-              <h4 className="font-medium text-blue-900">DoH端点地址:</h4>
-              <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-                <code className="text-sm text-blue-900 break-all">
+              <h4 className="font-medium text-blue-900 text-xs sm:text-sm">DoH端点地址:</h4>
+              <div className="p-2 sm:p-3 bg-blue-50 rounded-lg border border-blue-100">
+                <code className="text-xs text-blue-900 break-all">
                   {typeof window !== 'undefined' 
                     ? `${window.location.origin}/api/dns-query`
                     : 'https://your-domain/api/dns-query'}
                 </code>
               </div>
-              <p className="text-xs text-blue-600 mt-2">
+              <p className="text-xs text-blue-600 mt-1">
                 可在浏览器、手机或路由器中配置此DoH端点
               </p>
             </div>
