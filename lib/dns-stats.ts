@@ -1,11 +1,6 @@
 import { DNSQueryLog, DNSStats, DNSRecordType } from './dns-types';
+import { hasRedisConfig, getRedis } from './redis';
 
-// 检测是否有 Vercel KV 环境变量
-function hasKVConfig(): boolean {
-  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-}
-
-// ─── 内存回退实现（本地开发 / 无 KV 时使用）─────────────────────────────────
 class MemoryStatsManager {
   private logs: DNSQueryLog[] = [];
   private readonly MAX_LOGS = 1000;
@@ -80,8 +75,7 @@ class MemoryStatsManager {
   }
 }
 
-// ─── Vercel KV 实现 ──────────────────────────────────────────────────────────
-const KV_KEYS = {
+const REDIS_KEYS = {
   LOGS: 'dns:logs',
   TOTAL_QUERIES: 'dns:total_queries',
   CACHE_HITS: 'dns:cache_hits',
@@ -94,58 +88,42 @@ const KV_KEYS = {
 
 const MAX_LOGS = 1000;
 
-class KVStatsManager {
-  private kv: any = null;
-
-  private async getKV() {
-    if (!this.kv) {
-      const mod = await import('@vercel/kv');
-      this.kv = mod.kv;
-    }
-    return this.kv;
-  }
-
+class RedisStatsManager {
   async logQuery(log: DNSQueryLog): Promise<void> {
     try {
-      const kv = await this.getKV();
-      const pipeline = kv.pipeline();
+      const redis = getRedis();
+      const pipeline = redis.pipeline();
 
-      // 写入日志列表（头部插入，保留最近 MAX_LOGS 条）
-      pipeline.lpush(KV_KEYS.LOGS, JSON.stringify(log));
-      pipeline.ltrim(KV_KEYS.LOGS, 0, MAX_LOGS - 1);
+      pipeline.lpush(REDIS_KEYS.LOGS, JSON.stringify(log));
+      pipeline.ltrim(REDIS_KEYS.LOGS, 0, MAX_LOGS - 1);
 
-      // 更新计数器
-      pipeline.incr(KV_KEYS.TOTAL_QUERIES);
-      if (log.cached) pipeline.incr(KV_KEYS.CACHE_HITS);
+      pipeline.incr(REDIS_KEYS.TOTAL_QUERIES);
+      if (log.cached) pipeline.incr(REDIS_KEYS.CACHE_HITS);
       if (log.status === 'success') {
-        pipeline.incrbyfloat(KV_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
-        pipeline.incr(KV_KEYS.SUCCESS_COUNT);
+        pipeline.incrby(REDIS_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
+        pipeline.incr(REDIS_KEYS.SUCCESS_COUNT);
       }
 
-      // 更新查询类型分布
-      pipeline.incr(`${KV_KEYS.TYPE_PREFIX}${log.type}`);
+      pipeline.incr(`${REDIS_KEYS.TYPE_PREFIX}${log.type}`);
 
-      // 更新上游服务器统计
       if (log.upstream) {
-        const upstreamKey = `${KV_KEYS.UPSTREAM_PREFIX}${log.upstream}`;
+        const upstreamKey = `${REDIS_KEYS.UPSTREAM_PREFIX}${log.upstream}`;
         pipeline.hincrby(upstreamKey, 'queries', 1);
-        pipeline.hincrbyfloat(upstreamKey, 'totalTime', log.responseTime);
+        pipeline.hincrby(upstreamKey, 'totalTime', log.responseTime);
       }
 
-      // 初始化启动时间（只在第一次写入时设置）
-      pipeline.setnx(KV_KEYS.START_TIME, Date.now().toString());
+      pipeline.setnx(REDIS_KEYS.START_TIME, Date.now().toString());
 
       await pipeline.exec();
     } catch (error) {
-      console.error('[dns-stats] KV logQuery error:', error);
+      console.error('[dns-stats] Redis logQuery error:', error);
     }
   }
 
   async getStats(): Promise<DNSStats> {
     try {
-      const kv = await this.getKV();
+      const redis = getRedis();
 
-      // 并行读取所有计数器
       const [
         totalQueriesRaw,
         cacheHitsRaw,
@@ -154,12 +132,12 @@ class KVStatsManager {
         startTimeRaw,
         recentLogsRaw,
       ] = await Promise.all([
-        kv.get(KV_KEYS.TOTAL_QUERIES),
-        kv.get(KV_KEYS.CACHE_HITS),
-        kv.get(KV_KEYS.TOTAL_RESPONSE_TIME),
-        kv.get(KV_KEYS.SUCCESS_COUNT),
-        kv.get(KV_KEYS.START_TIME),
-        kv.lrange(KV_KEYS.LOGS, 0, 49),
+        redis.get(REDIS_KEYS.TOTAL_QUERIES),
+        redis.get(REDIS_KEYS.CACHE_HITS),
+        redis.get(REDIS_KEYS.TOTAL_RESPONSE_TIME),
+        redis.get(REDIS_KEYS.SUCCESS_COUNT),
+        redis.get(REDIS_KEYS.START_TIME),
+        redis.lrange(REDIS_KEYS.LOGS, 0, 49),
       ]);
 
       const totalQueries = Number(totalQueriesRaw) || 0;
@@ -172,12 +150,11 @@ class KVStatsManager {
       const uptimeMinutes = (Date.now() - startTime) / 1000 / 60;
       const queriesPerMinute = uptimeMinutes > 0 ? totalQueries / uptimeMinutes : 0;
 
-      // 读取上游服务器统计（扫描所有 dns:upstream:* 键）
-      const upstreamKeys = await kv.keys(`${KV_KEYS.UPSTREAM_PREFIX}*`);
+      const upstreamKeys = await redis.keys(`${REDIS_KEYS.UPSTREAM_PREFIX}*`);
       const upstreamServers = await Promise.all(
-        (upstreamKeys as string[]).map(async (key: string) => {
-          const data = await kv.hgetall(key);
-          const name = key.replace(KV_KEYS.UPSTREAM_PREFIX, '');
+        upstreamKeys.map(async (key: string) => {
+          const data = await redis.hgetall(key);
+          const name = key.replace(REDIS_KEYS.UPSTREAM_PREFIX, '');
           return {
             name,
             queries: Number(data?.queries) || 0,
@@ -188,19 +165,17 @@ class KVStatsManager {
         })
       );
 
-      // 读取查询类型分布（扫描所有 dns:type:* 键）
-      const typeKeys = await kv.keys(`${KV_KEYS.TYPE_PREFIX}*`);
+      const typeKeys = await redis.keys(`${REDIS_KEYS.TYPE_PREFIX}*`);
       const typeEntries = await Promise.all(
-        (typeKeys as string[]).map(async (key: string) => {
-          const count = await kv.get(key);
-          const type = key.replace(KV_KEYS.TYPE_PREFIX, '') as DNSRecordType;
+        typeKeys.map(async (key: string) => {
+          const count = await redis.get(key);
+          const type = key.replace(REDIS_KEYS.TYPE_PREFIX, '') as DNSRecordType;
           return [type, Number(count) || 0] as const;
         })
       );
       const queryTypeDistribution = Object.fromEntries(typeEntries) as Record<DNSRecordType, number>;
 
-      // 解析日志
-      const recentQueries: DNSQueryLog[] = (recentLogsRaw as string[]).map((raw) => {
+      const recentQueries: DNSQueryLog[] = recentLogsRaw.map((raw) => {
         try {
           return typeof raw === 'string' ? JSON.parse(raw) : raw;
         } catch {
@@ -218,7 +193,7 @@ class KVStatsManager {
         recentQueries,
       };
     } catch (error) {
-      console.error('[dns-stats] KV getStats error:', error);
+      console.error('[dns-stats] Redis getStats error:', error);
       return {
         totalQueries: 0,
         cacheHitRate: 0,
@@ -233,9 +208,9 @@ class KVStatsManager {
 
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
     try {
-      const kv = await this.getKV();
-      const raw = await kv.lrange(KV_KEYS.LOGS, offset, offset + limit - 1);
-      return (raw as string[]).map((item) => {
+      const redis = getRedis();
+      const raw = await redis.lrange(REDIS_KEYS.LOGS, offset, offset + limit - 1);
+      return raw.map((item) => {
         try {
           return typeof item === 'string' ? JSON.parse(item) : item;
         } catch {
@@ -243,15 +218,15 @@ class KVStatsManager {
         }
       }).filter(Boolean);
     } catch (error) {
-      console.error('[dns-stats] KV getLogs error:', error);
+      console.error('[dns-stats] Redis getLogs error:', error);
       return [];
     }
   }
 
   async getUptime(): Promise<number> {
     try {
-      const kv = await this.getKV();
-      const startTime = await kv.get(KV_KEYS.START_TIME);
+      const redis = getRedis();
+      const startTime = await redis.get(REDIS_KEYS.START_TIME);
       return startTime ? Date.now() - Number(startTime) : 0;
     } catch {
       return 0;
@@ -260,30 +235,28 @@ class KVStatsManager {
 
   async clear(): Promise<void> {
     try {
-      const kv = await this.getKV();
-      const keys = await kv.keys('dns:*');
+      const redis = getRedis();
+      const keys = await redis.keys('dns:*');
       if (keys.length > 0) {
-        await kv.del(...keys);
+        await redis.del(...keys);
       }
     } catch (error) {
-      console.error('[dns-stats] KV clear error:', error);
+      console.error('[dns-stats] Redis clear error:', error);
     }
   }
 }
 
-// ─── 统一接口代理（自动选择 KV 或内存）────────────────────────────────────────
 class DNSStatsProxy {
   private memory = new MemoryStatsManager();
-  private kvManager = new KVStatsManager();
+  private redisManager = new RedisStatsManager();
 
-  private useKV(): boolean {
-    return hasKVConfig();
+  private useRedis(): boolean {
+    return hasRedisConfig();
   }
 
   logQuery(log: DNSQueryLog): void {
-    if (this.useKV()) {
-      // 异步写 KV，不阻塞请求
-      this.kvManager.logQuery(log).catch((e) =>
+    if (this.useRedis()) {
+      this.redisManager.logQuery(log).catch((e) =>
         console.error('[dns-stats] async logQuery failed:', e)
       );
     } else {
@@ -292,33 +265,32 @@ class DNSStatsProxy {
   }
 
   async getStats(): Promise<DNSStats> {
-    if (this.useKV()) {
-      return this.kvManager.getStats();
+    if (this.useRedis()) {
+      return this.redisManager.getStats();
     }
     return this.memory.getStats();
   }
 
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
-    if (this.useKV()) {
-      return this.kvManager.getLogs(limit, offset);
+    if (this.useRedis()) {
+      return this.redisManager.getLogs(limit, offset);
     }
     return this.memory.getLogs(limit, offset);
   }
 
   async getUptime(): Promise<number> {
-    if (this.useKV()) {
-      return this.kvManager.getUptime();
+    if (this.useRedis()) {
+      return this.redisManager.getUptime();
     }
     return this.memory.getUptime();
   }
 
   async clear(): Promise<void> {
-    if (this.useKV()) {
-      return this.kvManager.clear();
+    if (this.useRedis()) {
+      return this.redisManager.clear();
     }
     this.memory.clear();
   }
 }
 
-// 全局单例
 export const dnsStats = new DNSStatsProxy();

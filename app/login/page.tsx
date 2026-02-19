@@ -114,10 +114,6 @@ export default function LoginPage() {
             >
               {loading ? '登录中...' : '登录'}
             </Button>
-
-            <div className="text-center text-sm text-muted-foreground">
-              <p>{'默认账号：xiya / xiya50491'}</p>
-            </div>
           </form>
         </CardContent>
       </Card>

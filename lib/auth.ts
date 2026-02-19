@@ -1,11 +1,8 @@
-// 简单的认证工具（生产环境应使用更安全的方案）
-export const AUTH_CREDENTIALS = {
-  username: 'xiya',
-  password: 'xiya50491',
-};
+const AUTH_USERNAME = process.env.AUTH_USERNAME || 'admin';
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'admin123';
 
 export function validateCredentials(username: string, password: string): boolean {
-  return username === AUTH_CREDENTIALS.username && password === AUTH_CREDENTIALS.password;
+  return username === AUTH_USERNAME && password === AUTH_PASSWORD;
 }
 
 export function setAuthToken() {
