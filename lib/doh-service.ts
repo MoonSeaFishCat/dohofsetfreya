@@ -2,6 +2,7 @@ import dnsPacket from 'dns-packet';
 import { DNSRecordType, DNSQueryResult, UpstreamDNS } from './dns-types';
 import { dnsCache } from './dns-cache';
 import { settingsStore } from './settings-store';
+import { dnsStats } from './dns-stats';
 
 export class DoHService {
   private cacheEnabled: boolean;
@@ -105,6 +106,7 @@ export class DoHService {
 
   // 处理DoH请求（RFC 8484）
   async handleDoHRequest(request: Request): Promise<Response> {
+    const startTime = Date.now();
     try {
       let dnsQuery: Buffer;
 
@@ -164,6 +166,25 @@ export class DoHService {
       }
 
       const responseBuffer = await upstreamResponse.arrayBuffer();
+      const responseTime = Date.now() - startTime;
+
+      // 记录到日志统计（异步，不阻塞响应）
+      const clientIp = (request as any).headers?.get?.('x-forwarded-for') ||
+                       (request as any).headers?.get?.('x-real-ip') || 'unknown';
+      const sanitizedIp = typeof clientIp === 'string'
+        ? clientIp.split('.').slice(0, 3).join('.') + '.***'
+        : 'unknown';
+      dnsStats.logQuery({
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+        domain: question.name,
+        type: (question.type as DNSRecordType) || 'A',
+        clientIp: sanitizedIp,
+        responseTime,
+        status: 'success',
+        cached: false,
+        upstream: upstream.name,
+      });
 
       return new Response(responseBuffer, {
         status: 200,

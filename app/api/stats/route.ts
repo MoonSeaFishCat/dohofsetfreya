@@ -6,9 +6,11 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    const stats = dnsStats.getStats();
+    const [stats, uptime] = await Promise.all([
+      dnsStats.getStats(),
+      dnsStats.getUptime(),
+    ]);
     const cacheStats = dnsCache.getStats();
-    const uptime = dnsStats.getUptime();
 
     return NextResponse.json({
       ...stats,
