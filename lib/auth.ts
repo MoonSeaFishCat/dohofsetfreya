@@ -1,7 +1,3 @@
-import { settingsStore } from './settings-store';
-
-export { settingsStore };
-
 export function setAuthToken() {
   if (typeof window !== 'undefined') {
     sessionStorage.setItem('dns_auth_token', 'authenticated');
