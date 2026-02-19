@@ -117,14 +117,15 @@ export class DoHService {
           return new Response('缺少dns参数', { status: 400 });
         }
 
-        // Base64URL解码
+        // Base64URL解码（补全 padding 以确保解码正确）
         const base64 = dnsParam.replace(/-/g, '+').replace(/_/g, '/');
-        dnsQuery = Buffer.from(base64, 'base64');
+        const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+        dnsQuery = Buffer.from(padded, 'base64');
       }
       // 处理POST请求
       else if (request.method === 'POST') {
         const contentType = request.headers.get('content-type');
-        if (contentType !== 'application/dns-message') {
+        if (!contentType || !contentType.includes('application/dns-message')) {
           return new Response('Content-Type必须是application/dns-message', { status: 400 });
         }
 

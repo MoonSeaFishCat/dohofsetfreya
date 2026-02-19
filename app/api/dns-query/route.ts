@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { dohService } from '@/lib/doh-service';
 
-export const runtime = 'edge'; // 使用Edge Runtime提升性能
+export const runtime = 'nodejs'; // dns-packet 和 Buffer 依赖 Node.js runtime
 
 // GET /api/dns-query?dns=<base64url>
 // POST /api/dns-query with application/dns-message body
