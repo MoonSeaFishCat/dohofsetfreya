@@ -1,7 +1,51 @@
 
 # 圣芙蕾雅学院云端DNS加密服务中心
 
+<div align="center">
+
+[![GitHub Repo](https://img.shields.io/badge/🔗_查看源码-GitHub-181717?style=flat&logo=github)](https://github.com/MoonSeaFishCat/dohofsetfreya)
+[![License](https://img.shields.io/badge/📄_许可证-AGPL--3.0-blue?style=flat)](https://github.com/MoonSeaFishCat/dohofsetfreya/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/MoonSeaFishCat/dohofsetfreya?style=flat&logo=github)](https://github.com/MoonSeaFishCat/dohofsetfreya/stargazers)
+[![Issues](https://img.shields.io/github/issues/MoonSeaFishCat/dohofsetfreya?style=flat&logo=github)](https://github.com/MoonSeaFishCat/dohofsetfreya/issues)
+
 一个高性能的DNS over HTTPS (DoH)服务端应用，提供安全、快速的域名解析服务。采用蓝白萌系设计风格，提供直观的管理界面和强大的DNS解析功能。
+
+</div>
+
+<div align="center">
+
+![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
+![宝塔面板](https://img.shields.io/badge/宝塔面板-部署运维-20A53A?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0xNiA4TDI0IDE2TDE2IDI0TDggMTZMMTYgOFoiIGZpbGw9IiMyMEE1M0EiLz48L3N2Zz4=&logoColor=white)
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)
+![GitHub](https://img.shields.io/badge/GitHub-MoonSeaFishCat/dohofsetfreya-181717?style=for-the-badge&logo=github&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-部署-000000?style=for-the-badge&logo=vercel&logoColor=white)
+
+---
+
+### 💡 推荐部署方式
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://www.bt.cn/" target="_blank">
+        <img src="https://img.shields.io/badge/宝塔面板-推荐-20A53A?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0xNiA4TDI0IDE2TDE2IDI0TDggMTZMMTYgOFoiIGZpbGw9IiMyMEE1M0EiLz48L3N2Zz4=&logoColor=white" alt="宝塔面板" height="40">
+      </a>
+      <br/><b>简单易用，可视化管理</b>
+      <br/><sub>适合需要长期稳定运行的生产环境</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="https://vercel.com" target="_blank">
+        <img src="https://img.shields.io/badge/Vercel-快速部署-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel" height="40">
+      </a>
+      <br/><b>一键部署，全球加速</b>
+      <br/><sub>适合快速体验和个人项目</sub>
+    </td>
+  </tr>
+</table>
+
+</div>
 
 ## ✨ 功能特性
 
@@ -32,8 +76,8 @@
 1. **克隆项目**
 
 ```bash
-git clone <repository-url>
-cd v0-project
+git clone https://github.com/MoonSeaFishCat/dohofsetfreya.git
+cd dohofsetfreya
 ```
 
 2. **安装依赖**
@@ -169,7 +213,7 @@ https://your-domain.com/api/dns-query
 ### 项目结构
 
 ```
-v0-project/
+dohofsetfreya/
 ├── app/                      # Next.js App Router
 │   ├── api/                  # API路由
 │   │   ├── auth/            # 认证相关API
@@ -225,6 +269,37 @@ pnpm start
 ```bash
 vercel deploy
 ```
+
+**使用宝塔面板部署:**
+
+<div align="left">
+<img src="https://img.shields.io/badge/推荐-宝塔面板部署-20A53A?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0xNiA4TDI0IDE2TDE2IDI0TDggMTZMMTYgOFoiIGZpbGw9IiMyMEE1M0EiLz48L3N2Zz4=&logoColor=white" alt="宝塔面板">
+</div>
+
+本项目使用 **[宝塔面板](https://www.bt.cn/)** 进行部署和管理，推荐使用宝塔面板简化部署流程：
+
+1. **安装宝塔面板**
+   ```bash
+   # Linux安装命令（CentOS/Ubuntu等）
+   wget -O install.sh https://download.bt.cn/install/install-ubuntu_6.0.sh && bash install.sh
+   ```
+
+2. **通过宝塔面板部署**
+   - 📦 在宝塔面板中安装 Node.js 管理器
+   - 🗂️ 创建 Node.js 项目并配置项目路径
+   - ▶️ 设置启动命令为 `pnpm start`
+   - 🔄 配置反向代理和域名
+   - 🔐 开启 SSL 证书支持 HTTPS
+
+3. **✨ 宝塔优势**
+   - 🖥️ **可视化管理** - 图形界面操作，无需复杂命令
+   - 🔄 **自动化部署** - 进程守护，自动重启
+   - 🔒 **SSL证书** - 一键申请Let's Encrypt证书，自动续期
+   - 📊 **监控管理** - 实时监控服务器性能和日志
+   - 🛡️ **安全防护** - 内置防火墙和安全加固
+   - 💾 **定时备份** - 自动备份数据和数据库
+
+> 💡 **适用场景**: 本项目推荐使用宝塔面板部署，特别适合需要长期稳定运行、需要专业运维管理的生产环境。
 
 ## 🔒 安全性
 
@@ -304,23 +379,74 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 - 您可以在界面上添加"获取源代码"链接指向您的代码仓库
 - 即使您不分发软件，只是提供网络服务，仍需公开源代码
 
+### 📦 获取源代码
+
+本项目源代码托管在 GitHub：
+
+**仓库地址**: [https://github.com/MoonSeaFishCat/dohofsetfreya](https://github.com/MoonSeaFishCat/dohofsetfreya)
+
+如需获取源代码，可以通过以下方式：
+- 在线浏览：访问上述GitHub仓库地址
+- 克隆仓库：`git clone https://github.com/MoonSeaFishCat/dohofsetfreya.git`
+- 下载ZIP：在仓库页面点击"Code" → "Download ZIP"
+
 ## 🙏 致谢
 
-- 感谢所有开源项目和贡献者
-- 使用了 Shadcn/ui 组件库
-- DNS解析基于 dns-packet 库
-- 部署于 Vercel 平台
+<table>
+  <tr>
+    <td align="center" width="200">
+      <a href="https://www.bt.cn/" target="_blank">
+        <img src="https://img.shields.io/badge/宝塔面板-20A53A?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI0IiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0xNiA4TDI0IDE2TDE2IDI0TDggMTZMMTYgOFoiIGZpbGw9IiMyMEE1M0EiLz48L3N2Zz4=&logoColor=white" alt="宝塔面板"><br/>
+        <b>宝塔面板</b>
+      </a><br/>
+      <sub>服务器部署与运维</sub>
+    </td>
+    <td align="center" width="200">
+      <a href="https://vercel.com" target="_blank">
+        <img src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel"><br/>
+        <b>Vercel</b>
+      </a><br/>
+      <sub>云端部署平台</sub>
+    </td>
+    <td align="center" width="200">
+      <a href="https://ui.shadcn.com/" target="_blank">
+        <img src="https://img.shields.io/badge/Shadcn/ui-000000?style=for-the-badge&logo=shadcnui&logoColor=white" alt="Shadcn/ui"><br/>
+        <b>Shadcn/ui</b>
+      </a><br/>
+      <sub>UI组件库</sub>
+    </td>
+  </tr>
+</table>
+
+**特别鸣谢:**
+
+- 🏢 **[宝塔面板](https://www.bt.cn/)** - 感谢提供优质的服务器管理解决方案，本项目使用宝塔面板进行部署和运维管理
+- 🎨 **Shadcn/ui** - 提供精美的UI组件库
+- 🔍 **dns-packet** - 提供DNS协议解析能力
+- ☁️ **Vercel** - 提供全球CDN加速和部署服务
+- 💙 感谢所有开源项目和贡献者
 
 ## 📧 联系方式
 
 如有问题或建议，欢迎通过以下方式联系：
 
-- 提交 Issue
-- 发送 Pull Request
-- 邮件联系: [your-email@example.com]
+- 💬 [提交 Issue](https://github.com/MoonSeaFishCat/dohofsetfreya/issues/new) - 报告bug或提出功能建议
+- 🔀 [发送 Pull Request](https://github.com/MoonSeaFishCat/dohofsetfreya/pulls) - 贡献代码
+- ⭐ [Star 项目](https://github.com/MoonSeaFishCat/dohofsetfreya) - 支持项目发展
+- 👀 [关注更新](https://github.com/MoonSeaFishCat/dohofsetfreya/subscription) - 获取最新动态
 
 ---
+
+<div align="center">
 
 **免责声明**: 本项目仅供学习和研究使用。在生产环境中使用前，请确保进行充分的安全评估和测试。
 
 Made with ❤️ by 圣芙蕾雅学院
+
+---
+
+[![GitHub](https://img.shields.io/badge/GitHub-MoonSeaFishCat/dohofsetfreya-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/MoonSeaFishCat/dohofsetfreya)
+[![Stars](https://img.shields.io/github/stars/MoonSeaFishCat/dohofsetfreya?style=for-the-badge&logo=github)](https://github.com/MoonSeaFishCat/dohofsetfreya/stargazers)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge)](https://github.com/MoonSeaFishCat/dohofsetfreya/blob/main/LICENSE)
+
+</div>
