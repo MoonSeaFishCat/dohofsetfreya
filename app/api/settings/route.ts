@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { settingsStore } from '@/lib/settings-store';
+import { requireAuth } from '@/lib/auth-server';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauthorized = requireAuth(request);
+  if (unauthorized) return unauthorized;
+
   await settingsStore.initialize();
   const credentials = settingsStore.getAuthCredentials();
+  const dnsSettings = settingsStore.getDNSSettings();
+
   return NextResponse.json({
-    upstreamServers: settingsStore.getAllUpstreamServers(),
+    ...dnsSettings,
     auth: {
       username: credentials.username,
     },
@@ -14,22 +20,21 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const unauthorized = requireAuth(request);
+  if (unauthorized) return unauthorized;
+
   await settingsStore.initialize();
 
   try {
     const body = await request.json();
-    const { upstreamServers: newServers, auth } = body;
+    const { upstreamServers: newServers, auth, dnsSettings } = body;
 
     if (newServers && Array.isArray(newServers)) {
-      for (const server of newServers) {
-        if (!server.name || !server.url) {
-          return NextResponse.json(
-            { error: '服务器配置缺少必要字段' },
-            { status: 400 }
-          );
-        }
-      }
       await settingsStore.setUpstreamServers(newServers);
+    }
+
+    if (dnsSettings && typeof dnsSettings === 'object') {
+      await settingsStore.setDNSSettings(dnsSettings);
     }
 
     if (auth && auth.username && auth.password) {
@@ -45,16 +50,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const updatedSettings = settingsStore.getDNSSettings();
     return NextResponse.json({
       success: true,
       message: '配置已更新',
-      upstreamServers: settingsStore.getAllUpstreamServers(),
+      ...updatedSettings,
       storageType: settingsStore.getStorageTypeName(),
     });
   } catch (error) {
     console.error('[settings API] Error:', error);
     return NextResponse.json(
-      { error: '更新配置失败' },
+      { error: error instanceof Error ? error.message : '更新配置失败' },
       { status: 500 }
     );
   }

@@ -1,10 +1,14 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { dnsStats } from '@/lib/dns-stats';
 import { dnsCache } from '@/lib/dns-cache';
+import { requireAuth } from '@/lib/auth-server';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauthorized = requireAuth(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const [stats, uptime] = await Promise.all([
       dnsStats.getStats(),

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dohService } from '@/lib/doh-service';
-import { dnsStats } from '@/lib/dns-stats';
 import { DNSRecordType } from '@/lib/dns-types';
+import { requireAuth } from '@/lib/auth-server';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
+  const unauthorized = requireAuth(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await request.json();
     const { domain, type = 'A', useCache = true } = body;
@@ -17,39 +20,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 执行查询
+    const clientIp = request.headers.get('x-forwarded-for') ||
+                     request.headers.get('x-real-ip') ||
+                     'unknown';
+    const sanitizedIp = clientIp === 'unknown'
+      ? clientIp
+      : clientIp.split(',')[0].trim().split('.').slice(0, 3).join('.') + '.***';
+
     const result = await dohService.query(
       domain,
       type as DNSRecordType,
-      useCache
+      useCache,
+      sanitizedIp
     );
-
-    // 记录到统计
-    const clientIp = request.headers.get('x-forwarded-for') || 
-                     request.headers.get('x-real-ip') || 
-                     'unknown';
-
-    // 脱敏IP（只保留前3段）
-    const sanitizedIp = clientIp.split('.').slice(0, 3).join('.') + '.***';
-
-    dnsStats.logQuery({
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: Date.now(),
-      domain,
-      type: type as DNSRecordType,
-      clientIp: sanitizedIp,
-      responseTime: result.responseTime,
-      status: result.success ? 'success' : 'error',
-      cached: result.cached,
-      upstream: result.upstream,
-      answers: result.answers.map((a: any) => {
-        if (a.type === 'A' || a.type === 'AAAA') return a.data;
-        if (a.type === 'CNAME') return a.data;
-        if (a.type === 'MX') return `${a.priority} ${a.exchange}`;
-        if (a.type === 'TXT') return a.data.join(' ');
-        return JSON.stringify(a.data);
-      }),
-    });
 
     return NextResponse.json({
       success: result.success,

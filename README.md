@@ -98,10 +98,10 @@ pnpm dev
 
 ### 默认登录信息
 
-- **用户名**: `xiya`
-- **密码**: `xiya50491`
+- **用户名**: `admin`
+- **密码**: `admin123`
 
-> ⚠️ **安全提示**: 请在生产环境中修改默认密码！编辑 `/lib/auth.ts` 文件更改登录凭证。
+> 安全提示: 生产环境必须通过环境变量或后台配置面板修改默认凭证，并设置高强度 `AUTH_SECRET`。
 
 ## 📖 使用说明
 
@@ -162,12 +162,17 @@ pnpm dev
 - AdGuard DNS: `https://dns.adguard.com/dns-query`
 - OpenDNS: `https://doh.opendns.com/dns-query`
 
-### 缓存配置
+### 缓存、上游和黑名单配置
 
-DNS缓存设置位于 `/lib/dns-cache.ts`：
-- 默认最大缓存条目：1000
-- 自动遵循DNS响应的TTL值
-- 支持手动清除缓存
+后台“配置”页面支持修改以下运行参数：
+
+- 缓存开关、TTL 和最大缓存条目数
+- 上游选择策略：优先级 fallback 或轮询 + fallback
+- 上游请求超时时间
+- 黑名单规则：精确域名、`.example.com` 后缀和 `*.example.com` 通配规则
+- 日志开关、日志上限和限流参数
+
+真实 DoH 请求与后台测试查询共用缓存和上游 fallback 链路。黑名单命中的 DoH 请求会返回 DNS `REFUSED` 响应，并记录为 `blocked`。
 
 ## 🌐 客户端配置
 
@@ -303,18 +308,19 @@ vercel deploy
 
 ## 🔒 安全性
 
-- 实现了基于令牌的用户认证
+- 管理后台使用服务端签名的 HTTP-only cookie
+- `/api/settings`、`/api/stats`、`/api/logs` 和 `/api/test-query` 要求登录
+- DoH 公共端点保留 RFC 8484 GET/POST 访问能力
+- 上游 DoH URL 强制使用 HTTPS，并拒绝明显的本机地址
 - 客户端IP地址脱敏处理
-- 输入验证防止恶意请求
-- 防DNS放大攻击保护
-- HTTPS加密传输
+- DNS 请求体和 GET 参数有大小限制
+- 黑名单命中会被拒绝并写入日志
 
-> ⚠️ **生产环境建议**:
-> 1. 修改默认登录凭证
-> 2. 实现更强的认证机制（如JWT、OAuth）
-> 3. 添加速率限制
-> 4. 配置CORS策略
-> 5. 使用数据库持久化日志和配置
+> 生产环境建议:
+> 1. 设置高强度 `AUTH_SECRET`
+> 2. 修改 `AUTH_USERNAME` 和 `AUTH_PASSWORD`
+> 3. 配置 Redis 或 Vercel KV，避免内存模式丢失设置和日志
+> 4. 在反向代理层启用 HTTPS、访问日志和基础限流
 
 ## 📊 性能优化
 

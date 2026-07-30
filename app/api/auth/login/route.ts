@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { settingsStore } from '@/lib/settings-store';
+import { attachAuthCookie } from '@/lib/auth-server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,10 +16,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (settingsStore.validateCredentials(username, password)) {
-      return NextResponse.json({
+      const response = NextResponse.json({
         success: true,
         message: '登录成功',
       });
+      attachAuthCookie(response);
+      return response;
     } else {
       return NextResponse.json(
         { error: '用户名或密码错误' },

@@ -1,7 +1,9 @@
-// DNS记录类型
 export type DNSRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'PTR' | 'SRV' | 'CAA';
 
-// DNS查询日志
+export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked';
+
+export type UpstreamPolicy = 'priority' | 'round-robin';
+
 export interface DNSQueryLog {
   id: string;
   timestamp: number;
@@ -9,13 +11,12 @@ export interface DNSQueryLog {
   type: DNSRecordType;
   clientIp: string;
   responseTime: number;
-  status: 'success' | 'error' | 'timeout';
+  status: DNSQueryStatus;
   cached: boolean;
   upstream?: string;
   answers?: string[];
 }
 
-// DNS统计数据
 export interface DNSStats {
   totalQueries: number;
   cacheHitRate: number;
@@ -30,7 +31,6 @@ export interface DNSStats {
   recentQueries: DNSQueryLog[];
 }
 
-// DNS缓存条目
 export interface DNSCacheEntry {
   domain: string;
   type: DNSRecordType;
@@ -39,7 +39,6 @@ export interface DNSCacheEntry {
   timestamp: number;
 }
 
-// 上游DNS服务器配置
 export interface UpstreamDNS {
   name: string;
   url: string;
@@ -47,18 +46,19 @@ export interface UpstreamDNS {
   priority: number;
 }
 
-// DNS服务器设置
 export interface DNSServerSettings {
   upstreamServers: UpstreamDNS[];
   cacheEnabled: boolean;
   cacheTTL: number;
+  cacheMaxEntries: number;
   enableLogging: boolean;
   maxLogEntries: number;
   rateLimit: number;
   blocklist: string[];
+  upstreamPolicy: UpstreamPolicy;
+  upstreamTimeout: number;
 }
 
-// DNS查询结果
 export interface DNSQueryResult {
   success: boolean;
   domain: string;
@@ -68,4 +68,12 @@ export interface DNSQueryResult {
   cached: boolean;
   upstream?: string;
   error?: string;
+  blocked?: boolean;
+}
+
+export interface DNSLogFilter {
+  q?: string;
+  type?: DNSRecordType | 'all';
+  status?: DNSQueryStatus | 'all';
+  cached?: boolean;
 }

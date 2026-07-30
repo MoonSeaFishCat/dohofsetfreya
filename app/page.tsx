@@ -11,7 +11,7 @@ import { QueryLogs } from '@/components/query-logs';
 import { ConfigurationPanel } from '@/components/configuration-panel';
 import { AnimatedBackground } from '@/components/animated-background';
 import { CloudIcon } from '@/components/cloud-icon';
-import { isAuthenticated, clearAuthToken } from '@/lib/auth';
+import { clearAuthToken } from '@/lib/auth';
 
 export default function HomePage() {
   const router = useRouter();
@@ -21,21 +21,41 @@ export default function HomePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const checkAuth = () => {
-      if (!isAuthenticated()) {
+    let cancelled = false;
+
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/me', { credentials: 'include' });
+        if (!response.ok) {
+          router.push('/login');
+          return;
+        }
+        if (!cancelled) {
+          setIsAuth(true);
+        }
+      } catch {
         router.push('/login');
-      } else {
-        setIsAuth(true);
+      } finally {
+        if (!cancelled) {
+          setIsChecking(false);
+        }
       }
-      setIsChecking(false);
     };
 
     checkAuth();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
-  const handleLogout = () => {
-    clearAuthToken();
-    router.push('/login');
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } finally {
+      clearAuthToken();
+      router.push('/login');
+    }
   };
 
   const tabs = [
@@ -44,6 +64,7 @@ export default function HomePage() {
     { value: 'logs', label: '日志', icon: Database },
     { value: 'config', label: '配置', icon: Server },
   ];
+
 
   if (isChecking || !isAuth) {
     return (

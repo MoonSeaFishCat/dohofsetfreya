@@ -1,218 +1,492 @@
 import dnsPacket from 'dns-packet';
-import { DNSRecordType, DNSQueryResult, UpstreamDNS } from './dns-types';
+import { DNSRecordType, DNSQueryLog, DNSQueryResult, DNSServerSettings, UpstreamDNS } from './dns-types';
 import { dnsCache } from './dns-cache';
 import { settingsStore } from './settings-store';
 import { dnsStats } from './dns-stats';
 
+const DNS_MESSAGE_MAX_BYTES = 4096;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const SUPPORTED_RECORD_TYPES = new Set<DNSRecordType>([
+  'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'PTR', 'SRV', 'CAA',
+]);
+
+type ForwardResult = {
+  upstream: UpstreamDNS;
+  buffer: Buffer;
+};
+
+type ResolveQueryOptions = {
+  useCache?: boolean;
+  clientIp?: string;
+  log?: boolean;
+};
+
+type RateLimitBucket = {
+  windowStart: number;
+  count: number;
+};
+
+function toDNSRecordType(value: unknown): DNSRecordType {
+  const normalized = String(value || 'A').toUpperCase() as DNSRecordType;
+  return SUPPORTED_RECORD_TYPES.has(normalized) ? normalized : 'A';
+}
+
+function sanitizeClientIp(request: Request): string {
+  const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+  if (clientIp === 'unknown') return clientIp;
+  return clientIp.split(',')[0].trim().split('.').slice(0, 3).join('.') + '.***';
+}
+
+function normalizeDomain(domain: string): string {
+  return domain.trim().replace(/\.$/, '').toLowerCase();
+}
+
+function answerToString(answer: any): string {
+  if (answer.type === 'A' || answer.type === 'AAAA' || answer.type === 'CNAME' || answer.type === 'NS') return String(answer.data);
+  if (answer.type === 'MX') return `${answer.priority} ${answer.exchange}`;
+  if (answer.type === 'TXT') return Array.isArray(answer.data) ? answer.data.join(' ') : String(answer.data);
+  return JSON.stringify(answer.data);
+}
+
+function getAnswerTTL(answers: any[], fallbackTTL: number): number {
+  const ttls = answers
+    .map((answer) => Number(answer.ttl))
+    .filter((ttl) => Number.isFinite(ttl) && ttl > 0);
+
+  return ttls.length > 0 ? Math.min(...ttls, fallbackTTL) : fallbackTTL;
+}
+
+function createDNSQuery(domain: string, recordType: DNSRecordType): Buffer {
+  return Buffer.from(dnsPacket.encode({
+    type: 'query',
+    id: Math.floor(Math.random() * 65535),
+    flags: dnsPacket.RECURSION_DESIRED,
+    questions: [{ type: recordType, name: domain }],
+  } as any));
+}
+
+function createRefusedResponse(packet: any, question: any): Buffer {
+  return Buffer.from(dnsPacket.encode({
+    type: 'response',
+    id: packet.id,
+    flags: dnsPacket.RECURSION_DESIRED | dnsPacket.RECURSION_AVAILABLE | 5,
+    questions: [question],
+    answers: [],
+  } as any));
+}
+
+function createCachedResponse(packet: any, question: any, answers: any[]): Buffer {
+  return Buffer.from(dnsPacket.encode({
+    type: 'response',
+    id: packet.id,
+    flags: dnsPacket.RECURSION_DESIRED | dnsPacket.RECURSION_AVAILABLE,
+    questions: [question],
+    answers,
+  } as any));
+}
+
 export class DoHService {
-  private cacheEnabled: boolean;
+  private roundRobinCursor = 0;
+  private rateLimitBuckets: Map<string, RateLimitBucket> = new Map();
 
-  constructor(cacheEnabled = true) {
-    this.cacheEnabled = cacheEnabled;
+  private async getSettings() {
+    await settingsStore.initialize();
+    return settingsStore.getDNSSettings();
   }
 
-  // 获取上游服务器（从设置存储中动态获取）
-  private getUpstreamServers(): UpstreamDNS[] {
-    return settingsStore.getUpstreamServers();
+  private isBlocked(domain: string, blocklist: string[]): boolean {
+    const normalized = normalizeDomain(domain);
+    return blocklist.some((rule) => {
+      const normalizedRule = normalizeDomain(rule);
+      if (!normalizedRule) return false;
+      if (normalizedRule.startsWith('*.')) {
+        const suffix = normalizedRule.slice(2);
+        return normalized === suffix || normalized.endsWith(`.${suffix}`);
+      }
+      if (normalizedRule.startsWith('.')) {
+        const suffix = normalizedRule.slice(1);
+        return normalized === suffix || normalized.endsWith(`.${suffix}`);
+      }
+      if (normalizedRule.includes('*')) {
+        const pattern = normalizedRule
+          .split('*')
+          .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+          .join('.*');
+        return new RegExp(`^${pattern}$`).test(normalized);
+      }
+      return normalized === normalizedRule;
+    });
   }
 
-  // 执行DNS查询
-  async query(domain: string, type: DNSRecordType = 'A', useCache = true): Promise<DNSQueryResult> {
+  private checkRateLimit(clientIp: string, limit: number): boolean {
+    if (limit <= 0 || clientIp === 'unknown') return true;
+
+    const now = Date.now();
+    const bucket = this.rateLimitBuckets.get(clientIp);
+    if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
+      this.rateLimitBuckets.set(clientIp, { windowStart: now, count: 1 });
+      return true;
+    }
+
+    bucket.count += 1;
+    return bucket.count <= limit;
+  }
+
+  private selectUpstreams(servers: UpstreamDNS[], policy: 'priority' | 'round-robin'): UpstreamDNS[] {
+    const sorted = [...servers].sort((a, b) => a.priority - b.priority);
+    if (policy !== 'round-robin' || sorted.length <= 1) {
+      return sorted;
+    }
+
+    const start = this.roundRobinCursor % sorted.length;
+    this.roundRobinCursor = (this.roundRobinCursor + 1) % sorted.length;
+    return [...sorted.slice(start), ...sorted.slice(0, start)];
+  }
+
+  private async forwardToUpstream(query: Buffer, upstreams: UpstreamDNS[], timeout: number): Promise<ForwardResult> {
+    let lastError: unknown;
+
+    for (const upstream of upstreams) {
+      try {
+        const response = await fetch(upstream.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Accept': 'application/dns-message',
+          },
+          body: query,
+          signal: AbortSignal.timeout(timeout),
+        });
+
+        if (!response.ok) {
+          throw new Error(`上游DNS服务器返回错误: ${response.status}`);
+        }
+
+        return {
+          upstream,
+          buffer: Buffer.from(await response.arrayBuffer()),
+        };
+      } catch (error) {
+        lastError = error;
+        console.error(`[doh-service] Upstream failed: ${upstream.name}`, error);
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('所有上游DNS服务器均不可用');
+  }
+
+  private logQuery(settings: DNSServerSettings, log: Omit<DNSQueryLog, 'id' | 'timestamp'>): void {
+    if (!settings.enableLogging) return;
+
+    dnsStats.logQuery({
+      ...log,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      timestamp: Date.now(),
+    });
+  }
+
+  private async resolveQuery(domain: string, type: DNSRecordType = 'A', options: ResolveQueryOptions = {}): Promise<DNSQueryResult> {
     const startTime = Date.now();
+    const normalizedDomain = normalizeDomain(domain);
+    const recordType = toDNSRecordType(type);
+    const useCache = options.useCache ?? true;
+    const clientIp = options.clientIp || 'unknown';
 
     try {
-      // 检查缓存
-      if (this.cacheEnabled && useCache) {
-        const cached = dnsCache.get(domain, type);
+      const settings = await this.getSettings();
+
+      if (!normalizedDomain) {
+        throw new Error('域名不能为空');
+      }
+
+      if (this.isBlocked(normalizedDomain, settings.blocklist)) {
+        const result: DNSQueryResult = {
+          success: false,
+          domain: normalizedDomain,
+          type: recordType,
+          answers: [],
+          responseTime: Date.now() - startTime,
+          cached: false,
+          blocked: true,
+          error: '域名已被黑名单拦截',
+        };
+
+        if (options.log) {
+          this.logQuery(settings, {
+            domain: normalizedDomain,
+            type: recordType,
+            clientIp,
+            responseTime: result.responseTime,
+            status: 'blocked',
+            cached: false,
+          });
+        }
+
+        return result;
+      }
+
+      if (settings.cacheEnabled && useCache) {
+        const cached = dnsCache.get(normalizedDomain, recordType);
         if (cached) {
-          return {
+          const result: DNSQueryResult = {
             success: true,
-            domain,
-            type,
+            domain: normalizedDomain,
+            type: recordType,
             answers: cached.answers,
             responseTime: Date.now() - startTime,
             cached: true,
           };
+
+          if (options.log) {
+            this.logQuery(settings, {
+              domain: normalizedDomain,
+              type: recordType,
+              clientIp,
+              responseTime: result.responseTime,
+              status: 'success',
+              cached: true,
+              answers: cached.answers.map(answerToString),
+            });
+          }
+
+          return result;
         }
       }
 
-      // 构造DNS查询包
-      const query = dnsPacket.encode({
-        type: 'query',
-        id: Math.floor(Math.random() * 65535),
-        flags: dnsPacket.RECURSION_DESIRED,
-        questions: [{
-          type: this.getDNSType(type),
-          name: domain,
-        }],
-      });
-
-      // 选择上游服务器
-      const upstream = this.selectUpstream();
-      if (!upstream) {
+      const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
+      if (upstreams.length === 0) {
         throw new Error('没有可用的上游DNS服务器');
       }
 
-      // 发送DoH请求
-      const response = await fetch(upstream.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/dns-message',
-          'Accept': 'application/dns-message',
-        },
-        body: query,
-        signal: AbortSignal.timeout(5000), // 5秒超时
-      });
-
-      if (!response.ok) {
-        throw new Error(`上游DNS服务器返回错误: ${response.status}`);
-      }
-
-      // 解析响应
-      const responseBuffer = await response.arrayBuffer();
-      const packet = dnsPacket.decode(Buffer.from(responseBuffer));
-
+      const { upstream, buffer } = await this.forwardToUpstream(createDNSQuery(normalizedDomain, recordType), upstreams, settings.upstreamTimeout);
+      const packet = dnsPacket.decode(buffer) as any;
       const answers = packet.answers || [];
       const responseTime = Date.now() - startTime;
 
-      // 缓存结果
-      if (this.cacheEnabled && answers.length > 0) {
-        const ttl = Math.min(...answers.map((a: any) => a.ttl || 300));
-        dnsCache.set(domain, type, answers, ttl);
+      if (settings.cacheEnabled && answers.length > 0) {
+        const ttl = getAnswerTTL(answers, settings.cacheTTL);
+        dnsCache.set(normalizedDomain, recordType, answers, ttl, settings.cacheMaxEntries);
       }
 
-      return {
+      const result: DNSQueryResult = {
         success: true,
-        domain,
-        type,
+        domain: normalizedDomain,
+        type: recordType,
         answers,
         responseTime,
         cached: false,
         upstream: upstream.name,
       };
+
+      if (options.log) {
+        this.logQuery(settings, {
+          domain: normalizedDomain,
+          type: recordType,
+          clientIp,
+          responseTime,
+          status: 'success',
+          cached: false,
+          upstream: upstream.name,
+          answers: answers.map(answerToString),
+        });
+      }
+
+      return result;
     } catch (error) {
-      console.error('[v0] DNS query error:', error);
+      const responseTime = Date.now() - startTime;
+      const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+      console.error('[doh-service] DNS query error:', error);
+
+      const settings = await this.getSettings();
+      if (options.log) {
+        this.logQuery(settings, {
+          domain: normalizedDomain || 'unknown',
+          type: recordType,
+          clientIp,
+          responseTime,
+          status: isTimeout ? 'timeout' : 'error',
+          cached: false,
+        });
+      }
+
       return {
         success: false,
-        domain,
-        type,
+        domain: normalizedDomain,
+        type: recordType,
         answers: [],
-        responseTime: Date.now() - startTime,
+        responseTime,
         cached: false,
         error: error instanceof Error ? error.message : '未知错误',
       };
     }
   }
 
-  // 处理DoH请求（RFC 8484）
+  async query(domain: string, type: DNSRecordType = 'A', useCache = true, clientIp = 'unknown'): Promise<DNSQueryResult> {
+    return this.resolveQuery(domain, type, { useCache, clientIp, log: true });
+  }
+
   async handleDoHRequest(request: Request): Promise<Response> {
     const startTime = Date.now();
+    let domain = 'unknown';
+    let recordType: DNSRecordType = 'A';
+
     try {
-      let dnsQuery: Buffer;
+      const settings = await this.getSettings();
+      const clientIp = sanitizeClientIp(request);
 
-      // 处理GET请求
-      if (request.method === 'GET') {
-        const url = new URL(request.url);
-        const dnsParam = url.searchParams.get('dns');
-        
-        if (!dnsParam) {
-          return new Response('缺少dns参数', { status: 400 });
-        }
-
-        // Base64URL解码（补全 padding 以确保解码正确）
-        const base64 = dnsParam.replace(/-/g, '+').replace(/_/g, '/');
-        const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
-        dnsQuery = Buffer.from(padded, 'base64');
-      }
-      // 处理POST请求
-      else if (request.method === 'POST') {
-        const contentType = request.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/dns-message')) {
-          return new Response('Content-Type必须是application/dns-message', { status: 400 });
-        }
-
-        const arrayBuffer = await request.arrayBuffer();
-        dnsQuery = Buffer.from(arrayBuffer);
-      } else {
-        return new Response('只支持GET和POST方法', { status: 405 });
+      if (!this.checkRateLimit(clientIp, settings.rateLimit)) {
+        this.logQuery(settings, {
+          domain,
+          type: recordType,
+          clientIp,
+          responseTime: Date.now() - startTime,
+          status: 'error',
+          cached: false,
+        });
+        return new Response('请求过于频繁', { status: 429 });
       }
 
-      // 解析查询
-      const packet = dnsPacket.decode(dnsQuery);
+      const dnsQuery = await this.parseRequestBody(request);
+      const packet = dnsPacket.decode(dnsQuery) as any;
       const question = packet.questions?.[0];
-
       if (!question) {
         return new Response('无效的DNS查询', { status: 400 });
       }
 
-      // 选择上游服务器并转发
-      const upstream = this.selectUpstream();
-      if (!upstream) {
+      domain = normalizeDomain(question.name);
+      recordType = toDNSRecordType(question.type);
+
+      if (this.isBlocked(domain, settings.blocklist)) {
+        this.logQuery(settings, {
+          domain,
+          type: recordType,
+          clientIp,
+          responseTime: Date.now() - startTime,
+          status: 'blocked',
+          cached: false,
+        });
+
+        return new Response(createRefusedResponse(packet, question), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
+      const cached = settings.cacheEnabled ? dnsCache.get(domain, recordType) : null;
+      if (cached) {
+        this.logQuery(settings, {
+          domain,
+          type: recordType,
+          clientIp,
+          responseTime: Date.now() - startTime,
+          status: 'success',
+          cached: true,
+          answers: cached.answers.map(answerToString),
+        });
+
+        return new Response(createCachedResponse(packet, question, cached.answers), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': `max-age=${cached.ttl}`,
+          },
+        });
+      }
+
+      const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
+      if (upstreams.length === 0) {
         return new Response('没有可用的上游DNS服务器', { status: 503 });
       }
 
-      const upstreamResponse = await fetch(upstream.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/dns-message',
-          'Accept': 'application/dns-message',
-        },
-        body: dnsQuery,
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (!upstreamResponse.ok) {
-        throw new Error(`上游服务器错误: ${upstreamResponse.status}`);
-      }
-
-      const responseBuffer = await upstreamResponse.arrayBuffer();
+      const { upstream, buffer } = await this.forwardToUpstream(dnsQuery, upstreams, settings.upstreamTimeout);
+      const responsePacket = dnsPacket.decode(buffer) as any;
+      const answers = responsePacket.answers || [];
       const responseTime = Date.now() - startTime;
 
-      // 记录到日志统计（异步，不阻塞响应）
-      const clientIp = (request as any).headers?.get?.('x-forwarded-for') ||
-                       (request as any).headers?.get?.('x-real-ip') || 'unknown';
-      const sanitizedIp = typeof clientIp === 'string'
-        ? clientIp.split('.').slice(0, 3).join('.') + '.***'
-        : 'unknown';
-      dnsStats.logQuery({
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        timestamp: Date.now(),
-        domain: question.name,
-        type: (question.type as DNSRecordType) || 'A',
-        clientIp: sanitizedIp,
+      if (settings.cacheEnabled && answers.length > 0) {
+        const ttl = getAnswerTTL(answers, settings.cacheTTL);
+        dnsCache.set(domain, recordType, answers, ttl, settings.cacheMaxEntries);
+      }
+
+      this.logQuery(settings, {
+        domain,
+        type: recordType,
+        clientIp,
         responseTime,
         status: 'success',
         cached: false,
         upstream: upstream.name,
+        answers: answers.map(answerToString),
       });
 
-      return new Response(responseBuffer, {
+      return new Response(buffer, {
         status: 200,
         headers: {
           'Content-Type': 'application/dns-message',
-          'Cache-Control': 'max-age=300',
+          'Cache-Control': `max-age=${getAnswerTTL(answers, settings.cacheTTL)}`,
         },
       });
     } catch (error) {
-      console.error('[v0] DoH request error:', error);
+      if (error instanceof Response) {
+        return error;
+      }
+
+      console.error('[doh-service] DoH request error:', error);
+      const settings = await this.getSettings();
+      this.logQuery(settings, {
+        domain,
+        type: recordType,
+        clientIp: sanitizeClientIp(request),
+        responseTime: Date.now() - startTime,
+        status: error instanceof DOMException && error.name === 'TimeoutError' ? 'timeout' : 'error',
+        cached: false,
+      });
       return new Response('DNS查询失败', { status: 500 });
     }
   }
 
-  // 选择上游服务器（简单轮询）
-  private selectUpstream(): UpstreamDNS | null {
-    const enabled = this.getUpstreamServers();
-    if (enabled.length === 0) return null;
+  private async parseRequestBody(request: Request): Promise<Buffer> {
+    if (request.method === 'GET') {
+      const url = new URL(request.url);
+      const dnsParam = url.searchParams.get('dns');
 
-    // 已经按优先级排序，返回第一个
-    return enabled[0];
-  }
+      if (!dnsParam) {
+        throw new Response('缺少dns参数', { status: 400 });
+      }
+      if (dnsParam.length > DNS_MESSAGE_MAX_BYTES * 2) {
+        throw new Response('DNS查询过大', { status: 413 });
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(dnsParam)) {
+        throw new Response('dns参数格式无效', { status: 400 });
+      }
 
-  // 获取DNS类型字符串
-  private getDNSType(type: DNSRecordType): string {
-    return type;
+      const base64 = dnsParam.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+      const buffer = Buffer.from(padded, 'base64');
+      if (buffer.byteLength > DNS_MESSAGE_MAX_BYTES) {
+        throw new Response('DNS查询过大', { status: 413 });
+      }
+      return buffer;
+    }
+
+    if (request.method === 'POST') {
+      const contentType = request.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/dns-message')) {
+        throw new Response('Content-Type必须是application/dns-message', { status: 400 });
+      }
+
+      const arrayBuffer = await request.arrayBuffer();
+      if (arrayBuffer.byteLength > DNS_MESSAGE_MAX_BYTES) {
+        throw new Response('DNS查询过大', { status: 413 });
+      }
+      return Buffer.from(arrayBuffer);
+    }
+
+    throw new Response('只支持GET和POST方法', { status: 405 });
   }
 }
 
-// 全局DoH服务实例
 export const dohService = new DoHService();
