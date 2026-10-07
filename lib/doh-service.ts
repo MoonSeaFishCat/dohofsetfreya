@@ -1,4 +1,5 @@
 import dnsPacket from 'dns-packet';
+import { createSocket } from 'dgram';
 import { DNSRecordType, DNSQueryLog, DNSQueryResult, DNSServerSettings, UpstreamDNS } from './dns-types';
 import { dnsCache } from './dns-cache';
 import { settingsStore } from './settings-store';
@@ -140,13 +141,13 @@ export class DoHService {
     });
   }
 
-  // 过滤判定喵~ 白名单=只放行命中的小可爱，黑名单=命中的统统拦下 (◕‿◕)
-  // 拒绝时返回 REFUSED，浏览器会自动回退到系统 DNS，不影响其他网页加载~
-  private shouldRefuse(domain: string, settings: DNSServerSettings): boolean {
-    if (settings.filterMode === 'off') return false;
-    if (BROWSER_PROBE_HOSTS.has(domain)) return false;
+  // 过滤处置判定喵~ refuse=回REFUSED拦截 direct=分流到直连解析器 normal=正常走DoH上游 (◕‿◕)
+  private getFilterDisposition(domain: string, settings: DNSServerSettings): 'refuse' | 'direct' | 'normal' {
+    if (settings.filterMode === 'off') return 'normal';
+    if (BROWSER_PROBE_HOSTS.has(domain)) return 'normal';
     const matched = this.matchesDomainRule(domain, settings.blocklist);
-    return settings.filterMode === 'whitelist' ? !matched : matched;
+    const isFiltered = settings.filterMode === 'whitelist' ? !matched : matched;
+    return isFiltered ? settings.filterAction : 'normal';
   }
 
   private checkRateLimit(clientIp: string, limit: number): boolean {
@@ -206,6 +207,50 @@ export class DoHService {
     throw lastError instanceof Error ? lastError : new Error('所有上游DNS服务器均不可用');
   }
 
+  // 直连解析喵~ udp:// 走明文 DNS（等价本地解析器），https:// 走指定 DoH (ง •̀_•́)ง
+  private async forwardDirect(query: Buffer, resolver: string, timeout: number): Promise<Buffer> {
+    if (resolver.startsWith('udp://')) {
+      const url = new URL(resolver);
+      return this.resolveViaUdp(query, url.hostname, Number(url.port) || 53, timeout);
+    }
+
+    const response = await fetch(resolver, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/dns-message',
+        'Accept': 'application/dns-message',
+      },
+      body: query,
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    if (!response.ok) {
+      throw new Error(`直连解析器返回错误: ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  private resolveViaUdp(query: Buffer, host: string, port: number, timeout: number): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const socket = createSocket('udp4');
+      const timer = setTimeout(() => {
+        socket.close();
+        reject(new Error('直连 DNS 查询超时'));
+      }, timeout);
+      socket.once('error', (error) => {
+        clearTimeout(timer);
+        socket.close();
+        reject(error);
+      });
+      socket.once('message', (msg) => {
+        clearTimeout(timer);
+        socket.close();
+        resolve(Buffer.from(msg));
+      });
+      socket.send(query, port, host);
+    });
+  }
+
   private logQuery(settings: DNSServerSettings, log: Omit<DNSQueryLog, 'id' | 'timestamp'>): void {
     if (!settings.enableLogging) return;
 
@@ -230,33 +275,7 @@ export class DoHService {
         throw new Error('域名不能为空');
       }
 
-      if (this.shouldRefuse(normalizedDomain, settings)) {
-        const result: DNSQueryResult = {
-          success: false,
-          domain: normalizedDomain,
-          type: recordType,
-          answers: [],
-          responseTime: Date.now() - startTime,
-          cached: false,
-          blocked: true,
-          error: '域名已被过滤规则拦截',
-        };
-
-        if (options.log) {
-          this.logQuery(settings, {
-            domain: normalizedDomain,
-            type: recordType,
-            clientIp,
-            responseTime: result.responseTime,
-            status: 'blocked',
-            cached: false,
-          });
-        }
-
-        return result;
-      }
-
-      // SNI 阻断代答喵~ 命中规则的域名直接回虚拟 IP，让本地代理嗅探 SNI 接管 (๑>◡<๑)
+      // SNI 阻断代答喵~ 显式名单优先于过滤动作 (๑>◡<๑)
       if (settings.fakeIpRules.length > 0
         && (recordType === 'A' || recordType === 'AAAA')
         && this.matchesDomainRule(normalizedDomain, settings.fakeIpRules)) {
@@ -282,6 +301,33 @@ export class DoHService {
             status: 'fakeip',
             cached: false,
             answers: fakeAnswers.map((answer) => String(answer.data)),
+          });
+        }
+
+        return result;
+      }
+
+      const disposition = this.getFilterDisposition(normalizedDomain, settings);
+      if (disposition === 'refuse') {
+        const result: DNSQueryResult = {
+          success: false,
+          domain: normalizedDomain,
+          type: recordType,
+          answers: [],
+          responseTime: Date.now() - startTime,
+          cached: false,
+          blocked: true,
+          error: '域名已被过滤规则拦截',
+        };
+
+        if (options.log) {
+          this.logQuery(settings, {
+            domain: normalizedDomain,
+            type: recordType,
+            clientIp,
+            responseTime: result.responseTime,
+            status: 'blocked',
+            cached: false,
           });
         }
 
@@ -316,12 +362,31 @@ export class DoHService {
         }
       }
 
-      const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
-      if (upstreams.length === 0) {
-        throw new Error('没有可用的上游DNS服务器');
+      const queryBuffer = createDNSQuery(normalizedDomain, recordType);
+      let buffer: Buffer | undefined;
+      let upstreamName = settings.directResolver;
+      let status: 'success' | 'direct' = 'direct';
+
+      // 分流喵~ 命中过滤的域名走直连解析器，失败自动回退上游兜底 (◕‿◕)
+      if (disposition === 'direct') {
+        try {
+          buffer = await this.forwardDirect(queryBuffer, settings.directResolver, settings.upstreamTimeout);
+        } catch (error) {
+          console.error('[doh-service] Direct resolver failed, fallback to upstream:', error);
+        }
       }
 
-      const { upstream, buffer } = await this.forwardToUpstream(createDNSQuery(normalizedDomain, recordType), upstreams, settings.upstreamTimeout);
+      if (!buffer) {
+        const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
+        if (upstreams.length === 0) {
+          throw new Error('没有可用的上游DNS服务器');
+        }
+        const forwarded = await this.forwardToUpstream(queryBuffer, upstreams, settings.upstreamTimeout);
+        buffer = forwarded.buffer;
+        upstreamName = forwarded.upstream.name;
+        status = 'success';
+      }
+
       const packet = dnsPacket.decode(buffer) as any;
       const answers = packet.answers || [];
       const responseTime = Date.now() - startTime;
@@ -338,7 +403,7 @@ export class DoHService {
         answers,
         responseTime,
         cached: false,
-        upstream: upstream.name,
+        upstream: upstreamName,
       };
 
       if (options.log) {
@@ -347,9 +412,9 @@ export class DoHService {
           type: recordType,
           clientIp,
           responseTime,
-          status: 'success',
+          status,
           cached: false,
-          upstream: upstream.name,
+          upstream: upstreamName,
           answers: answers.map(answerToString),
         });
       }
@@ -422,26 +487,7 @@ export class DoHService {
       const isKnownType = SUPPORTED_RECORD_TYPES.has(rawType as DNSRecordType);
       recordType = toDNSRecordType(rawType);
 
-      if (this.shouldRefuse(domain, settings)) {
-        this.logQuery(settings, {
-          domain,
-          type: recordType,
-          clientIp,
-          responseTime: Date.now() - startTime,
-          status: 'blocked',
-          cached: false,
-        });
-
-        return new Response(createRefusedResponse(packet, question), {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/dns-message',
-            'Cache-Control': 'no-store',
-          },
-        });
-      }
-
-      // SNI 阻断代答：命中规则的 A/AAAA 查询返回虚拟 IP，交给本地代理嗅探接管
+      // SNI 阻断代答：命中规则的 A/AAAA 查询返回虚拟 IP，交给本地代理嗅探接管（优先于过滤动作）
       if (settings.fakeIpRules.length > 0
         && (rawType === 'A' || rawType === 'AAAA')
         && this.matchesDomainRule(domain, settings.fakeIpRules)) {
@@ -456,6 +502,26 @@ export class DoHService {
         });
 
         return new Response(createFakeIpResponse(packet, question, settings.fakeIpAddress, rawType === 'AAAA'), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
+      const disposition = this.getFilterDisposition(domain, settings);
+      if (disposition === 'refuse') {
+        this.logQuery(settings, {
+          domain,
+          type: recordType,
+          clientIp,
+          responseTime: Date.now() - startTime,
+          status: 'blocked',
+          cached: false,
+        });
+
+        return new Response(createRefusedResponse(packet, question), {
           status: 200,
           headers: {
             'Content-Type': 'application/dns-message',
@@ -485,12 +551,30 @@ export class DoHService {
         });
       }
 
-      const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
-      if (upstreams.length === 0) {
-        return new Response('没有可用的上游DNS服务器', { status: 503 });
+      let buffer: Buffer | undefined;
+      let upstreamName = settings.directResolver;
+      let status: 'success' | 'direct' = 'direct';
+
+      // 分流喵~ 命中过滤的域名走直连解析器，失败自动回退上游兜底 (◕‿◕)
+      if (disposition === 'direct') {
+        try {
+          buffer = await this.forwardDirect(dnsQuery, settings.directResolver, settings.upstreamTimeout);
+        } catch (error) {
+          console.error('[doh-service] Direct resolver failed, fallback to upstream:', error);
+        }
       }
 
-      const { upstream, buffer } = await this.forwardToUpstream(dnsQuery, upstreams, settings.upstreamTimeout);
+      if (!buffer) {
+        const upstreams = this.selectUpstreams(settings.upstreamServers.filter((server) => server.enabled), settings.upstreamPolicy);
+        if (upstreams.length === 0) {
+          return new Response('没有可用的上游DNS服务器', { status: 503 });
+        }
+        const forwarded = await this.forwardToUpstream(dnsQuery, upstreams, settings.upstreamTimeout);
+        buffer = forwarded.buffer;
+        upstreamName = forwarded.upstream.name;
+        status = 'success';
+      }
+
       const responsePacket = dnsPacket.decode(buffer) as any;
       const answers = responsePacket.answers || [];
       const responseTime = Date.now() - startTime;
@@ -505,9 +589,9 @@ export class DoHService {
         type: recordType,
         clientIp,
         responseTime,
-        status: 'success',
+        status,
         cached: false,
-        upstream: upstream.name,
+        upstream: upstreamName,
         answers: answers.map(answerToString),
       });
 

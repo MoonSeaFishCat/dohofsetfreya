@@ -23,7 +23,7 @@ class MemoryStatsManager {
     }
     this.totalQueries++;
     if (log.cached) this.cacheHits++;
-    if (log.status === 'success') {
+    if (log.status === 'success' || log.status === 'direct') {
       this.totalResponseTime += log.responseTime;
       this.successCount++;
     }
@@ -113,7 +113,7 @@ class KVStatsManager {
 
       pipeline.incr(STORAGE_KEYS.TOTAL_QUERIES);
       if (log.cached) pipeline.incr(STORAGE_KEYS.CACHE_HITS);
-      if (log.status === 'success') {
+      if (log.status === 'success' || log.status === 'direct') {
         pipeline.incrbyfloat(STORAGE_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
         pipeline.incr(STORAGE_KEYS.SUCCESS_COUNT);
       }
@@ -271,7 +271,7 @@ class RedisStatsManager {
 
       pipeline.incr(STORAGE_KEYS.TOTAL_QUERIES);
       if (log.cached) pipeline.incr(STORAGE_KEYS.CACHE_HITS);
-      if (log.status === 'success') {
+      if (log.status === 'success' || log.status === 'direct') {
         pipeline.incrby(STORAGE_KEYS.TOTAL_RESPONSE_TIME, log.responseTime);
         pipeline.incr(STORAGE_KEYS.SUCCESS_COUNT);
       }

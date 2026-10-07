@@ -169,16 +169,18 @@ pnpm dev
 - 缓存开关、TTL 和最大缓存条目数
 - 上游选择策略：优先级 fallback 或轮询 + fallback
 - 上游请求超时时间
-- 域名过滤模式：`off` 关闭过滤 / `blacklist` 命中规则不走 DoH / `whitelist` 仅命中规则走 DoH
+- 域名过滤模式：`off` 关闭过滤 / `blacklist` 命中规则的域名被过滤 / `whitelist` 仅命中规则的域名走 DoH
+- 命中动作：`refuse` 返回 REFUSED 彻底拦截 / `direct` 分流到直连解析器（普通 DNS 或另一组 DoH）
+- 直连解析器：支持 `udp://IP[:端口]` 明文 DNS（等价本地解析）或 `https://.../dns-query`
 - 过滤规则：精确域名、`.example.com` 后缀和 `*.example.com` 通配规则
 - SNI 阻断代答：命中规则的域名 A 查询返回配置的虚拟 IP（默认 `198.18.0.1`）、AAAA 返回空记录，交由本地代理嗅探接管
 - 日志开关、日志上限和限流参数
 
-真实 DoH 请求与后台测试查询共用缓存和上游 fallback 链路。被过滤的 DoH 请求会返回 DNS `REFUSED` 响应，并记录为 `blocked`；SNI 代答请求记录为 `fakeip`。
+真实 DoH 请求与后台测试查询共用缓存和上游 fallback 链路。被过滤的 DoH 请求按命中动作返回 `REFUSED`（记录为 `blocked`）或分流直连解析（记录为 `direct`，失败自动回退上游）；SNI 代答请求记录为 `fakeip`。
 
 **SNI 阻断处理说明**：本服务提供两层能力——① 支持 `HTTPS`/`SVCB` 记录查询，浏览器可正常获取 ECH 加密配置，ECH-capable 站点（如 Cloudflare）的 SNI 对嗅探不可见；② 对 SNI 阻断名单内的域名返回虚拟 IP，需配合本地代理（如 mihomo/sing-box TUN 模式 + SNI 嗅探，fake-ip 段与服务端配置一致）接管连接。纯 DNS 无法独自绕开 SNI 阻断，两种方案分别依赖对端站点支持 ECH 或本地代理环境。
 
-**浏览器回退说明**：被过滤域名返回 `REFUSED` 后，浏览器（Chrome/Firefox 回退模式）会自动改用系统 DNS 解析该域名。配合白名单模式可以实现"只有指定域名走 DoH，其他网站用本地 DNS"，避免影响其他网页加载。
+**DoH 分流说明**：想实现"只有指定域名走加密 DoH，其他网站正常加载"，请使用 **白名单 + `direct` 直连动作**——白名单域名走上游 DoH，其余域名由服务端经直连解析器（如 `udp://223.5.5.5`）解析真实 IP 返回，浏览器其他网页不受影响。⚠️ 实测 Chrome/Edge 的"安全 DNS"模式收到 `REFUSED` **不会**回退本地 DNS，网站会直接打不开，`refuse` 动作仅适用于需要彻底拦截的场景（如黑名单广告域名）。
 
 **浏览器探针兼容**：Chrome/Edge 在添加自定义 DoH 提供商时会探测 `www.gstatic.com` 的 A 记录。为保证任何过滤模式下都能通过验证，该探针域名始终放行（不参与过滤）。
 

@@ -29,6 +29,8 @@ interface SettingsData {
   rateLimit: number;
   blocklist: string[];
   filterMode: 'off' | 'blacklist' | 'whitelist';
+  filterAction: 'refuse' | 'direct';
+  directResolver: string;
   fakeIpRules: string[];
   fakeIpAddress: string;
   upstreamPolicy: 'priority' | 'round-robin';
@@ -47,6 +49,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   rateLimit: 0,
   blocklist: [],
   filterMode: 'blacklist',
+  filterAction: 'refuse',
+  directResolver: 'udp://223.5.5.5',
   fakeIpRules: [],
   fakeIpAddress: '198.18.0.1',
   upstreamPolicy: 'priority',
@@ -287,22 +291,51 @@ export function ConfigurationPanel() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>域名过滤模式</Label>
-            <select
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={settings.filterMode}
-              onChange={(e) => setSettings({ ...settings, filterMode: e.target.value as SettingsData['filterMode'] })}
-            >
-              <option value="off">关闭过滤（所有域名都走 DoH）</option>
-              <option value="blacklist">黑名单：命中规则的域名不走 DoH</option>
-              <option value="whitelist">白名单：仅命中规则的域名走 DoH</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              被过滤的域名会返回 REFUSED，浏览器自动回退到系统 DNS，不影响其他网页加载。
-              浏览器探针域名（www.gstatic.com）始终放行，以保证 Chrome/Edge 提供商验证通过。
-            </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>域名过滤模式</Label>
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={settings.filterMode}
+                onChange={(e) => setSettings({ ...settings, filterMode: e.target.value as SettingsData['filterMode'] })}
+              >
+                <option value="off">关闭过滤（所有域名都走 DoH）</option>
+                <option value="blacklist">黑名单：命中规则的域名被过滤</option>
+                <option value="whitelist">白名单：仅命中规则的域名走 DoH</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>命中动作</Label>
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={settings.filterAction}
+                onChange={(e) => setSettings({ ...settings, filterAction: e.target.value as SettingsData['filterAction'] })}
+                disabled={settings.filterMode === 'off'}
+              >
+                <option value="refuse">拒绝：返回 REFUSED（网站会打不开）</option>
+                <option value="direct">直连：分流到直连解析器（不影响浏览）</option>
+              </select>
+            </div>
           </div>
+          {settings.filterMode !== 'off' && settings.filterAction === 'direct' && (
+            <div className="space-y-2 max-w-md">
+              <Label>直连解析器</Label>
+              <Input
+                value={settings.directResolver}
+                onChange={(e) => setSettings({ ...settings, directResolver: e.target.value })}
+                placeholder="udp://223.5.5.5"
+              />
+              <p className="text-xs text-muted-foreground">
+                支持 <code>udp://IP[:端口]</code>（明文 DNS，等价本地解析）或 <code>https://.../dns-query</code>（另一组 DoH）。
+              </p>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {settings.filterAction === 'direct'
+              ? '被过滤的域名改由直连解析器解析真实 IP，其他网页正常加载——这才是"不影响浏览"的正确姿势喵~'
+              : '注意：REFUSED 在 Chrome/Edge 安全模式下不会回退本地 DNS，被过滤的网站会直接打不开！'}
+            浏览器探针域名（www.gstatic.com）始终放行，保证提供商验证通过。
+          </p>
 
           <div className="space-y-2">
             <Label>过滤规则</Label>

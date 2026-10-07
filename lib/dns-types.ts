@@ -1,11 +1,14 @@
 export type DNSRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'PTR' | 'SRV' | 'CAA' | 'HTTPS' | 'SVCB';
 
-export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked' | 'fakeip';
+export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked' | 'fakeip' | 'direct';
 
 export type UpstreamPolicy = 'priority' | 'round-robin';
 
 // 域名过滤模式喵~ off=不过滤 blacklist=命中规则即拒绝 whitelist=仅放行命中域名 (ฅ'ω'ฅ)
 export type DNSFilterMode = 'off' | 'blacklist' | 'whitelist';
+
+// 命中动作喵~ refuse=回 REFUSED 拦截 direct=分流到直连解析器（不走 DoH 上游）
+export type DNSFilterAction = 'refuse' | 'direct';
 
 export interface DNSQueryLog {
   id: string;
@@ -59,6 +62,8 @@ export interface DNSServerSettings {
   rateLimit: number;
   blocklist: string[];
   filterMode: DNSFilterMode;
+  filterAction: DNSFilterAction;
+  directResolver: string;
   fakeIpRules: string[];
   fakeIpAddress: string;
   upstreamPolicy: UpstreamPolicy;

@@ -1,4 +1,4 @@
-import { DNSFilterMode, DNSServerSettings, UpstreamDNS } from './dns-types';
+import { DNSFilterAction, DNSFilterMode, DNSServerSettings, UpstreamDNS } from './dns-types';
 import { hasRedisConfig, getRedis } from './redis';
 
 interface AuthCredentials {
@@ -56,9 +56,31 @@ function readFilterModeEnv(): DNSFilterMode {
   return value === 'off' || value === 'whitelist' ? value : 'blacklist';
 }
 
+// 命中动作喵~ 默认 refuse 保持旧行为 (◕‿◕)
+function readFilterActionEnv(): DNSFilterAction {
+  return (process.env.DNS_FILTER_ACTION || '').toLowerCase() === 'direct' ? 'direct' : 'refuse';
+}
+
 const FILTER_MODES: readonly DNSFilterMode[] = ['off', 'blacklist', 'whitelist'];
+const FILTER_ACTIONS: readonly DNSFilterAction[] = ['refuse', 'direct'];
 
 const DEFAULT_FAKE_IP = '198.18.0.1';
+const DEFAULT_DIRECT_RESOLVER = 'udp://223.5.5.5';
+
+// 校验直连解析器喵~ 支持 udp://IP[:端口] 或 https://.../dns-query，乱写就打回默认 (・ω<)
+function normalizeDirectResolver(value?: string): string {
+  const raw = (value || '').trim();
+  if (!raw) return DEFAULT_DIRECT_RESOLVER;
+  const withScheme = raw.includes('://') ? raw : `udp://${raw}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol === 'udp:' && url.hostname) return withScheme;
+    if (url.protocol === 'https:') return url.toString();
+  } catch {
+    // 解析失败走默认值
+  }
+  return DEFAULT_DIRECT_RESOLVER;
+}
 
 // 校验代答虚拟 IP 喵~ 必须是合法 IPv4，乱写就打回默认值 (・ω<)
 function normalizeFakeIpAddress(value?: string): string {
@@ -78,6 +100,8 @@ const DEFAULT_DNS_SETTINGS: Omit<DNSServerSettings, 'upstreamServers'> = {
   rateLimit: readNumberEnv('DNS_RATE_LIMIT', 0),
   blocklist: readListEnv('DNS_BLOCKLIST'),
   filterMode: readFilterModeEnv(),
+  filterAction: readFilterActionEnv(),
+  directResolver: normalizeDirectResolver(process.env.DNS_DIRECT_RESOLVER),
   fakeIpRules: readListEnv('DNS_FAKE_IP_RULES'),
   fakeIpAddress: normalizeFakeIpAddress(process.env.DNS_FAKE_IP),
   upstreamPolicy: readUpstreamPolicyEnv(),
@@ -145,6 +169,10 @@ function mergeDNSSettings(settings?: Partial<DNSServerSettings>): DNSServerSetti
     filterMode: settings?.filterMode && FILTER_MODES.includes(settings.filterMode)
       ? settings.filterMode
       : DEFAULT_DNS_SETTINGS.filterMode,
+    filterAction: settings?.filterAction && FILTER_ACTIONS.includes(settings.filterAction)
+      ? settings.filterAction
+      : DEFAULT_DNS_SETTINGS.filterAction,
+    directResolver: normalizeDirectResolver(settings?.directResolver || DEFAULT_DNS_SETTINGS.directResolver),
     fakeIpRules: normalizeBlocklist(settings?.fakeIpRules || DEFAULT_DNS_SETTINGS.fakeIpRules),
     fakeIpAddress: normalizeFakeIpAddress(settings?.fakeIpAddress || DEFAULT_DNS_SETTINGS.fakeIpAddress),
     upstreamPolicy: settings?.upstreamPolicy === 'round-robin' ? 'round-robin' : 'priority',
