@@ -1,6 +1,6 @@
-export type DNSRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'PTR' | 'SRV' | 'CAA';
+export type DNSRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'PTR' | 'SRV' | 'CAA' | 'HTTPS' | 'SVCB';
 
-export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked';
+export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked' | 'fakeip';
 
 export type UpstreamPolicy = 'priority' | 'round-robin';
 
@@ -59,6 +59,8 @@ export interface DNSServerSettings {
   rateLimit: number;
   blocklist: string[];
   filterMode: DNSFilterMode;
+  fakeIpRules: string[];
+  fakeIpAddress: string;
   upstreamPolicy: UpstreamPolicy;
   upstreamTimeout: number;
 }
@@ -73,6 +75,7 @@ export interface DNSQueryResult {
   upstream?: string;
   error?: string;
   blocked?: boolean;
+  fakeip?: boolean;
 }
 
 export interface DNSLogFilter {

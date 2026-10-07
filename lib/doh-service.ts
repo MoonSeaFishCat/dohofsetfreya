@@ -6,8 +6,12 @@ import { dnsStats } from './dns-stats';
 
 const DNS_MESSAGE_MAX_BYTES = 4096;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const FAKE_IP_TTL = 60;
+// 浏览器 DoH 探针域名喵~ 任何模式下都必须放行，否则 Chrome/Edge 会判定提供商无效 (´；ω；`)
+// Chromium 源码：kDohProbeHostname = "www.gstatic.com"
+const BROWSER_PROBE_HOSTS = new Set(['www.gstatic.com']);
 const SUPPORTED_RECORD_TYPES = new Set<DNSRecordType>([
-  'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'PTR', 'SRV', 'CAA',
+  'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'PTR', 'SRV', 'CAA', 'HTTPS', 'SVCB',
 ]);
 
 type ForwardResult = {
@@ -85,6 +89,23 @@ function createCachedResponse(packet: any, question: any, answers: any[]): Buffe
   } as any));
 }
 
+// SNI 阻断代答喵~ A 查询回虚拟 IP 给本地代理嗅探接管；AAAA 回空让客户端走 IPv4 (๑•̀ㅂ•́)و✧
+function createFakeIpResponse(packet: any, question: any, fakeIp: string, isAAAA: boolean): Buffer {
+  const answers = isAAAA ? [] : [{
+    type: 'A',
+    name: question.name,
+    ttl: FAKE_IP_TTL,
+    data: fakeIp,
+  }];
+  return Buffer.from(dnsPacket.encode({
+    type: 'response',
+    id: packet.id,
+    flags: dnsPacket.RECURSION_DESIRED | dnsPacket.RECURSION_AVAILABLE,
+    questions: [question],
+    answers,
+  } as any));
+}
+
 export class DoHService {
   private roundRobinCursor = 0;
   private rateLimitBuckets: Map<string, RateLimitBucket> = new Map();
@@ -123,6 +144,7 @@ export class DoHService {
   // 拒绝时返回 REFUSED，浏览器会自动回退到系统 DNS，不影响其他网页加载~
   private shouldRefuse(domain: string, settings: DNSServerSettings): boolean {
     if (settings.filterMode === 'off') return false;
+    if (BROWSER_PROBE_HOSTS.has(domain)) return false;
     const matched = this.matchesDomainRule(domain, settings.blocklist);
     return settings.filterMode === 'whitelist' ? !matched : matched;
   }
@@ -228,6 +250,38 @@ export class DoHService {
             responseTime: result.responseTime,
             status: 'blocked',
             cached: false,
+          });
+        }
+
+        return result;
+      }
+
+      // SNI 阻断代答喵~ 命中规则的域名直接回虚拟 IP，让本地代理嗅探 SNI 接管 (๑>◡<๑)
+      if (settings.fakeIpRules.length > 0
+        && (recordType === 'A' || recordType === 'AAAA')
+        && this.matchesDomainRule(normalizedDomain, settings.fakeIpRules)) {
+        const fakeAnswers = recordType === 'A'
+          ? [{ type: 'A', name: normalizedDomain, ttl: FAKE_IP_TTL, data: settings.fakeIpAddress }]
+          : [];
+        const result: DNSQueryResult = {
+          success: true,
+          domain: normalizedDomain,
+          type: recordType,
+          answers: fakeAnswers,
+          responseTime: Date.now() - startTime,
+          cached: false,
+          fakeip: true,
+        };
+
+        if (options.log) {
+          this.logQuery(settings, {
+            domain: normalizedDomain,
+            type: recordType,
+            clientIp,
+            responseTime: result.responseTime,
+            status: 'fakeip',
+            cached: false,
+            answers: fakeAnswers.map((answer) => String(answer.data)),
           });
         }
 
@@ -363,7 +417,10 @@ export class DoHService {
       }
 
       domain = normalizeDomain(question.name);
-      recordType = toDNSRecordType(question.type);
+      // 记录原始类型喵~ 未知类型照样转发上游，只是不进缓存防止串味 (ฅ'ω'ฅ)
+      const rawType = String(question.type || 'A').toUpperCase();
+      const isKnownType = SUPPORTED_RECORD_TYPES.has(rawType as DNSRecordType);
+      recordType = toDNSRecordType(rawType);
 
       if (this.shouldRefuse(domain, settings)) {
         this.logQuery(settings, {
@@ -384,7 +441,30 @@ export class DoHService {
         });
       }
 
-      const cached = settings.cacheEnabled ? dnsCache.get(domain, recordType) : null;
+      // SNI 阻断代答：命中规则的 A/AAAA 查询返回虚拟 IP，交给本地代理嗅探接管
+      if (settings.fakeIpRules.length > 0
+        && (rawType === 'A' || rawType === 'AAAA')
+        && this.matchesDomainRule(domain, settings.fakeIpRules)) {
+        this.logQuery(settings, {
+          domain,
+          type: recordType,
+          clientIp,
+          responseTime: Date.now() - startTime,
+          status: 'fakeip',
+          cached: false,
+          answers: rawType === 'A' ? [settings.fakeIpAddress] : [],
+        });
+
+        return new Response(createFakeIpResponse(packet, question, settings.fakeIpAddress, rawType === 'AAAA'), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/dns-message',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
+      const cached = settings.cacheEnabled && isKnownType ? dnsCache.get(domain, recordType) : null;
       if (cached) {
         this.logQuery(settings, {
           domain,
@@ -415,7 +495,7 @@ export class DoHService {
       const answers = responsePacket.answers || [];
       const responseTime = Date.now() - startTime;
 
-      if (settings.cacheEnabled && answers.length > 0) {
+      if (settings.cacheEnabled && isKnownType && answers.length > 0) {
         const ttl = getAnswerTTL(answers, settings.cacheTTL);
         dnsCache.set(domain, recordType, answers, ttl, settings.cacheMaxEntries);
       }

@@ -19,6 +19,7 @@ interface QueryResult {
   responseTime: number;
   cached: boolean;
   upstream?: string;
+  fakeip?: boolean;
   error?: string;
 }
 
@@ -126,6 +127,8 @@ export function DNSQueryTool() {
                 <SelectItem value="NS">NS - 名称服务器</SelectItem>
                 <SelectItem value="SOA">SOA - 授权起始</SelectItem>
                 <SelectItem value="PTR">PTR - 指针记录</SelectItem>
+                <SelectItem value="HTTPS">HTTPS - HTTPS服务绑定(ECH)</SelectItem>
+                <SelectItem value="SVCB">SVCB - 服务绑定</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -220,6 +223,12 @@ export function DNSQueryTool() {
                       缓存状态:
                     </span>
                     <Badge className="bg-emerald-100 text-emerald-700 text-xs">从缓存返回</Badge>
+                  </div>
+                )}
+                {result.fakeip && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm text-amber-700">SNI代答:</span>
+                    <Badge className="bg-violet-100 text-violet-600 border-violet-200 text-xs">返回虚拟IP</Badge>
                   </div>
                 )}
                 {result.upstream && (

@@ -29,6 +29,8 @@ interface SettingsData {
   rateLimit: number;
   blocklist: string[];
   filterMode: 'off' | 'blacklist' | 'whitelist';
+  fakeIpRules: string[];
+  fakeIpAddress: string;
   upstreamPolicy: 'priority' | 'round-robin';
   upstreamTimeout: number;
 }
@@ -45,6 +47,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   rateLimit: 0,
   blocklist: [],
   filterMode: 'blacklist',
+  fakeIpRules: [],
+  fakeIpAddress: '198.18.0.1',
   upstreamPolicy: 'priority',
   upstreamTimeout: 5000,
 };
@@ -55,6 +59,7 @@ export function ConfigurationPanel() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [blocklistText, setBlocklistText] = useState('');
+  const [fakeIpText, setFakeIpText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -71,6 +76,7 @@ export function ConfigurationPanel() {
       setSettings({ ...DEFAULT_SETTINGS, ...data });
       setNewUsername(data.auth?.username || '');
       setBlocklistText((data.blocklist || []).join('\n'));
+      setFakeIpText((data.fakeIpRules || []).join('\n'));
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取设置失败');
     }
@@ -89,7 +95,9 @@ export function ConfigurationPanel() {
         body: JSON.stringify({
           dnsSettings: {
             ...settings,
-            blocklist: blocklistText.split('\n').map((item) => item.trim()).filter(Boolean),
+            // 换行或逗号都能分隔规则喵~ 怎么写都行 (ฅ'ω'ฅ)
+            blocklist: blocklistText.split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
+            fakeIpRules: fakeIpText.split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
           },
         }),
       });
@@ -98,6 +106,7 @@ export function ConfigurationPanel() {
       if (!response.ok) throw new Error(data.error || '保存失败');
       setSettings({ ...settings, ...data });
       setBlocklistText((data.blocklist || []).join('\n'));
+      setFakeIpText((data.fakeIpRules || []).join('\n'));
       setMessage('DNS 配置已保存');
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
@@ -291,6 +300,7 @@ export function ConfigurationPanel() {
             </select>
             <p className="text-xs text-muted-foreground">
               被过滤的域名会返回 REFUSED，浏览器自动回退到系统 DNS，不影响其他网页加载。
+              浏览器探针域名（www.gstatic.com）始终放行，以保证 Chrome/Edge 提供商验证通过。
             </p>
           </div>
 
@@ -299,7 +309,7 @@ export function ConfigurationPanel() {
             <Textarea
               value={blocklistText}
               onChange={(e) => setBlocklistText(e.target.value)}
-              placeholder="每行一条，例如：ads.example.com、.tracking.example、*.bad.example"
+              placeholder="每行一条或用逗号分隔，例如：ads.example.com、.tracking.example、*.bad.example"
               className="min-h-28 font-mono text-sm"
               disabled={settings.filterMode === 'off'}
             />
@@ -307,6 +317,38 @@ export function ConfigurationPanel() {
               支持精确域名、`.后缀`（匹配该域名及子域）和 `*.` 通配符。
               {settings.filterMode === 'whitelist' && ' 注意：白名单模式下规则为空将拒绝所有域名！'}
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>SNI 阻断代答规则</Label>
+            <Textarea
+              value={fakeIpText}
+              onChange={(e) => setFakeIpText(e.target.value)}
+              placeholder="每行一条或用逗号分隔，例如：*.linux.do"
+              className="min-h-20 font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              命中规则的域名：A 查询返回下方虚拟 IP、AAAA 返回空记录。浏览器随后对虚拟 IP 的连接需由本地代理（mihomo / sing-box 的 TUN + SNI 嗅探）接管，以绕开 SNI 阻断。
+            </p>
+          </div>
+
+          <div className="space-y-2 max-w-xs">
+            <Label>代答虚拟 IP</Label>
+            <Input
+              value={settings.fakeIpAddress}
+              onChange={(e) => setSettings({ ...settings, fakeIpAddress: e.target.value })}
+              placeholder="198.18.0.1"
+            />
+            <p className="text-xs text-muted-foreground">
+              建议使用保留段 198.18.0.0/15 内的地址，与本地代理的 fake-ip 范围保持一致。
+            </p>
+          </div>
+
+          <div className="pt-2 border-t border-orange-100">
+            <Button onClick={saveDNSSettings} disabled={isSaving} className="bg-orange-400 hover:bg-orange-500 rounded-full">
+              <Save className="w-4 h-4 mr-2" />
+              {isSaving ? '保存中...' : '保存服务设置'}
+            </Button>
           </div>
         </CardContent>
       </Card>

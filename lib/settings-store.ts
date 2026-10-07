@@ -58,6 +58,17 @@ function readFilterModeEnv(): DNSFilterMode {
 
 const FILTER_MODES: readonly DNSFilterMode[] = ['off', 'blacklist', 'whitelist'];
 
+const DEFAULT_FAKE_IP = '198.18.0.1';
+
+// 校验代答虚拟 IP 喵~ 必须是合法 IPv4，乱写就打回默认值 (・ω<)
+function normalizeFakeIpAddress(value?: string): string {
+  const ip = (value || '').trim();
+  const parts = ip.split('.').map(Number);
+  return parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+    ? ip
+    : DEFAULT_FAKE_IP;
+}
+
 const DEFAULT_DNS_SETTINGS: Omit<DNSServerSettings, 'upstreamServers'> = {
   cacheEnabled: readBooleanEnv('DNS_CACHE_ENABLED', true),
   cacheTTL: readNumberEnv('DNS_CACHE_TTL', 300),
@@ -67,6 +78,8 @@ const DEFAULT_DNS_SETTINGS: Omit<DNSServerSettings, 'upstreamServers'> = {
   rateLimit: readNumberEnv('DNS_RATE_LIMIT', 0),
   blocklist: readListEnv('DNS_BLOCKLIST'),
   filterMode: readFilterModeEnv(),
+  fakeIpRules: readListEnv('DNS_FAKE_IP_RULES'),
+  fakeIpAddress: normalizeFakeIpAddress(process.env.DNS_FAKE_IP),
   upstreamPolicy: readUpstreamPolicyEnv(),
   upstreamTimeout: readNumberEnv('DNS_UPSTREAM_TIMEOUT', 5000),
 };
@@ -132,6 +145,8 @@ function mergeDNSSettings(settings?: Partial<DNSServerSettings>): DNSServerSetti
     filterMode: settings?.filterMode && FILTER_MODES.includes(settings.filterMode)
       ? settings.filterMode
       : DEFAULT_DNS_SETTINGS.filterMode,
+    fakeIpRules: normalizeBlocklist(settings?.fakeIpRules || DEFAULT_DNS_SETTINGS.fakeIpRules),
+    fakeIpAddress: normalizeFakeIpAddress(settings?.fakeIpAddress || DEFAULT_DNS_SETTINGS.fakeIpAddress),
     upstreamPolicy: settings?.upstreamPolicy === 'round-robin' ? 'round-robin' : 'priority',
     upstreamTimeout: Math.min(15000, Math.max(1000, Number(settings?.upstreamTimeout || DEFAULT_DNS_SETTINGS.upstreamTimeout))),
   };

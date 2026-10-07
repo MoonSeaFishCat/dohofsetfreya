@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
       responseTime: result.responseTime,
       cached: result.cached,
       upstream: result.upstream,
+      fakeip: result.fakeip,
       error: result.error,
     });
   } catch (error) {

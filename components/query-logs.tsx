@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, CheckCircle, XCircle, Clock, Download } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, Clock, Download, Sparkles } from 'lucide-react';
 
 interface QueryLog {
   id: string;
@@ -94,6 +94,7 @@ export function QueryLogs() {
       case 'error': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />;
       case 'timeout': return <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-amber-500" />;
       case 'blocked': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-rose-400" />;
+      case 'fakeip': return <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-violet-500" />;
       default: return null;
     }
   };
@@ -104,6 +105,7 @@ export function QueryLogs() {
       case 'error': return <Badge className="bg-red-100 text-red-600 border-red-200 text-xs">失败</Badge>;
       case 'timeout': return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs">超时</Badge>;
       case 'blocked': return <Badge className="bg-rose-100 text-rose-600 border-rose-200 text-xs">拦截</Badge>;
+      case 'fakeip': return <Badge className="bg-violet-100 text-violet-600 border-violet-200 text-xs">代答</Badge>;
       default: return <Badge variant="outline" className="text-xs">{value}</Badge>;
     }
   };
@@ -133,6 +135,8 @@ export function QueryLogs() {
                 <SelectItem value="NS">NS</SelectItem>
                 <SelectItem value="SOA">SOA</SelectItem>
                 <SelectItem value="PTR">PTR</SelectItem>
+                <SelectItem value="HTTPS">HTTPS</SelectItem>
+                <SelectItem value="SVCB">SVCB</SelectItem>
               </SelectContent>
             </Select>
             <Select value={status} onValueChange={setStatus}>
@@ -143,6 +147,7 @@ export function QueryLogs() {
                 <SelectItem value="error">失败</SelectItem>
                 <SelectItem value="timeout">超时</SelectItem>
                 <SelectItem value="blocked">拦截</SelectItem>
+                <SelectItem value="fakeip">代答</SelectItem>
               </SelectContent>
             </Select>
             <Select value={cached} onValueChange={setCached}>
