@@ -68,21 +68,21 @@ export default function HomePage() {
 
   if (isChecking || !isAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-blue-50">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 via-[#FFFBF6] to-rose-50/70">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-blue-600">加载中...</p>
+          <div className="w-16 h-16 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-amber-700">加载中...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-[#FFFBF6] to-rose-50/70">
       <AnimatedBackground />
-      
+
       {/* 顶部标题区域 */}
-      <header className="border-b border-blue-100 bg-white/80 backdrop-blur-sm sticky top-0 z-20">
+      <header className="border-b border-orange-100/80 bg-[#FFFCF8]/80 backdrop-blur-sm sticky top-0 z-20">
         <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
@@ -90,26 +90,26 @@ export default function HomePage() {
                 <CloudIcon className="w-full h-full" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="text-base sm:text-xl lg:text-2xl font-bold text-blue-900 truncate">
+                <h1 className="text-base sm:text-xl lg:text-2xl font-bold text-amber-900 truncate">
                   圣芙蕾雅学院DNS服务中心
                 </h1>
-                <p className="text-xs sm:text-sm text-blue-600 truncate hidden sm:block">
+                <p className="text-xs sm:text-sm text-amber-700/80 truncate hidden sm:block">
                   安全、快速的DNS over HTTPS加密解析服务
                 </p>
               </div>
             </div>
-            
+
             {/* 桌面端状态和登出 */}
             <div className="hidden md:flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-sm font-medium text-green-700">运行中</span>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-full">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-sm font-medium text-emerald-700">运行中</span>
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleLogout}
-                className="border-blue-200 hover:bg-blue-50"
+                className="border-orange-200 hover:bg-orange-50 rounded-full"
               >
                 <LogOut className="w-4 h-4 mr-2" />
                 登出
@@ -129,17 +129,17 @@ export default function HomePage() {
 
           {/* 移动端下拉菜单 */}
           {mobileMenuOpen && (
-            <div className="md:hidden mt-3 pt-3 border-t border-blue-100">
+            <div className="md:hidden mt-3 pt-3 border-t border-orange-100">
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-full">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-sm font-medium text-green-700">运行中</span>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-full">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-sm font-medium text-emerald-700">运行中</span>
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleLogout}
-                  className="border-blue-200 hover:bg-blue-50"
+                  className="border-orange-200 hover:bg-orange-50 rounded-full"
                 >
                   <LogOut className="w-4 h-4 mr-2" />
                   登出
@@ -154,7 +154,7 @@ export default function HomePage() {
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 lg:py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 sm:space-y-6">
           {/* 移动端底部导航 */}
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-blue-100 z-20 md:hidden">
+          <div className="fixed bottom-0 left-0 right-0 bg-[#FFFCF8] border-t border-orange-100 z-20 md:hidden">
             <div className="grid grid-cols-4">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
@@ -164,8 +164,8 @@ export default function HomePage() {
                     onClick={() => setActiveTab(tab.value)}
                     className={`flex flex-col items-center justify-center py-2 transition-colors ${
                       activeTab === tab.value
-                        ? 'text-blue-600 bg-blue-50'
-                        : 'text-gray-500 hover:text-blue-600'
+                        ? 'text-orange-500 bg-orange-50'
+                        : 'text-stone-400 hover:text-orange-500'
                     }`}
                   >
                     <Icon className="w-5 h-5" />
@@ -177,14 +177,14 @@ export default function HomePage() {
           </div>
 
           {/* 桌面端标签栏 */}
-          <TabsList className="hidden md:flex bg-white border border-blue-100 p-1 shadow-sm w-full justify-start overflow-x-auto">
+          <TabsList className="hidden md:flex bg-white border border-orange-100 p-1 shadow-soft w-full justify-start overflow-x-auto rounded-2xl">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <TabsTrigger
                   key={tab.value}
                   value={tab.value}
-                  className="data-[state=active]:bg-blue-500 data-[state=active]:text-white flex items-center gap-2 whitespace-nowrap"
+                  className="data-[state=active]:bg-orange-400 data-[state=active]:text-white flex items-center gap-2 whitespace-nowrap rounded-xl"
                 >
                   <Icon className="w-4 h-4" />
                   {tab.label}
@@ -212,8 +212,8 @@ export default function HomePage() {
       </main>
 
       {/* 页脚 - 移动端隐藏 */}
-      <footer className="hidden md:block border-t border-blue-100 bg-white/80 backdrop-blur-sm mt-16">
-        <div className="container mx-auto px-4 py-6 text-center text-sm text-blue-600">
+      <footer className="hidden md:block border-t border-orange-100 bg-[#FFFCF8]/80 backdrop-blur-sm mt-16">
+        <div className="container mx-auto px-4 py-6 text-center text-sm text-amber-700/80">
           <p>圣芙蕾雅学院云端DNS加密服务中心</p>
         </div>
       </footer>

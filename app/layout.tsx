@@ -1,10 +1,15 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Nunito, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+// 圆润软软的 Nunito 是治愈系的灵魂字体喵~ (ฅ'ω'ฅ)
+const nunito = Nunito({
+  subsets: ['latin'],
+  weight: ['400', '600', '700', '800'],
+  variable: '--font-nunito',
+});
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: '--font-geist-mono' });
 
 export const metadata: Metadata = {
   title: '圣芙蕾雅学院云端DNS加密服务中心',
@@ -35,8 +40,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="font-sans antialiased">
+    <html lang="zh-CN">
+      <body className={`${nunito.variable} ${geistMono.variable} font-sans antialiased`}>
         {children}
         <Analytics />
       </body>

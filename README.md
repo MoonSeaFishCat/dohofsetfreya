@@ -169,10 +169,13 @@ pnpm dev
 - 缓存开关、TTL 和最大缓存条目数
 - 上游选择策略：优先级 fallback 或轮询 + fallback
 - 上游请求超时时间
-- 黑名单规则：精确域名、`.example.com` 后缀和 `*.example.com` 通配规则
+- 域名过滤模式：`off` 关闭过滤 / `blacklist` 命中规则不走 DoH / `whitelist` 仅命中规则走 DoH
+- 过滤规则：精确域名、`.example.com` 后缀和 `*.example.com` 通配规则
 - 日志开关、日志上限和限流参数
 
-真实 DoH 请求与后台测试查询共用缓存和上游 fallback 链路。黑名单命中的 DoH 请求会返回 DNS `REFUSED` 响应，并记录为 `blocked`。
+真实 DoH 请求与后台测试查询共用缓存和上游 fallback 链路。被过滤的 DoH 请求会返回 DNS `REFUSED` 响应，并记录为 `blocked`。
+
+**浏览器回退说明**：被过滤域名返回 `REFUSED` 后，浏览器（Chrome/Firefox 回退模式）会自动改用系统 DNS 解析该域名。配合白名单模式可以实现"只有指定域名走 DoH，其他网站用本地 DNS"，避免影响其他网页加载。
 
 ## 🌐 客户端配置
 
@@ -314,7 +317,7 @@ vercel deploy
 - 上游 DoH URL 强制使用 HTTPS，并拒绝明显的本机地址
 - 客户端IP地址脱敏处理
 - DNS 请求体和 GET 参数有大小限制
-- 黑名单命中会被拒绝并写入日志
+- 被过滤规则命中的域名会被拒绝并写入日志
 
 > 生产环境建议:
 > 1. 设置高强度 `AUTH_SECRET`

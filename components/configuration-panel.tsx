@@ -28,6 +28,7 @@ interface SettingsData {
   maxLogEntries: number;
   rateLimit: number;
   blocklist: string[];
+  filterMode: 'off' | 'blacklist' | 'whitelist';
   upstreamPolicy: 'priority' | 'round-robin';
   upstreamTimeout: number;
 }
@@ -43,6 +44,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   maxLogEntries: 1000,
   rateLimit: 0,
   blocklist: [],
+  filterMode: 'blacklist',
   upstreamPolicy: 'priority',
   upstreamTimeout: 5000,
 };
@@ -173,17 +175,17 @@ export function ConfigurationPanel() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {(message || error) && (
-        <Alert className={error ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}>
-          <AlertDescription className={error ? 'text-red-700' : 'text-green-700'}>
+        <Alert className={error ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}>
+          <AlertDescription className={error ? 'text-red-600' : 'text-emerald-700'}>
             {error || message}
           </AlertDescription>
         </Alert>
       )}
 
-      <Card className="border-blue-100 shadow-md">
+      <Card className="border-orange-100 shadow-soft">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-blue-900 text-base sm:text-lg">
-            <Shield className="w-5 h-5 text-blue-600" />
+          <CardTitle className="flex items-center gap-2 text-amber-900 text-base sm:text-lg">
+            <Shield className="w-5 h-5 text-orange-500" />
             登录凭证
           </CardTitle>
           <CardDescription>修改管理后台登录用户名和密码</CardDescription>
@@ -199,7 +201,7 @@ export function ConfigurationPanel() {
             </div>
             <div className="space-y-2">
               <Label>当前用户名</Label>
-              <Input value={settings.auth.username} disabled className="bg-gray-50" />
+              <Input value={settings.auth.username} disabled className="bg-orange-50/50" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">新密码</Label>
@@ -211,7 +213,7 @@ export function ConfigurationPanel() {
             </div>
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <Button onClick={saveAuth} disabled={isSaving} className="bg-blue-500 hover:bg-blue-600">
+            <Button onClick={saveAuth} disabled={isSaving} className="bg-orange-400 hover:bg-orange-500 rounded-full">
               <Save className="w-4 h-4 mr-2" />
               保存凭证
             </Button>
@@ -222,29 +224,29 @@ export function ConfigurationPanel() {
         </CardContent>
       </Card>
 
-      <Card className="border-blue-100 shadow-md">
+      <Card className="border-orange-100 shadow-soft">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-blue-900 text-base sm:text-lg">
-            <Settings className="w-5 h-5 text-blue-600" />
+          <CardTitle className="flex items-center gap-2 text-amber-900 text-base sm:text-lg">
+            <Settings className="w-5 h-5 text-orange-500" />
             DoH 服务设置
           </CardTitle>
-          <CardDescription>服务端点、缓存、上游策略和黑名单</CardDescription>
+          <CardDescription>服务端点、缓存、上游策略和域名过滤</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>服务地址</Label>
-            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <code className="text-xs sm:text-sm text-blue-900 break-all">{dohEndpoint}</code>
+            <div className="p-3 bg-orange-50 rounded-xl border border-orange-200">
+              <code className="text-xs sm:text-sm text-amber-900 break-all">{dohEndpoint}</code>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <label className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 p-3 text-sm text-blue-900">
-              <input type="checkbox" checked={settings.cacheEnabled} onChange={(e) => setSettings({ ...settings, cacheEnabled: e.target.checked })} />
+            <label className="flex items-center gap-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3 text-sm text-amber-900">
+              <input type="checkbox" checked={settings.cacheEnabled} onChange={(e) => setSettings({ ...settings, cacheEnabled: e.target.checked })} className="accent-orange-500" />
               启用缓存
             </label>
-            <label className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 p-3 text-sm text-blue-900">
-              <input type="checkbox" checked={settings.enableLogging} onChange={(e) => setSettings({ ...settings, enableLogging: e.target.checked })} />
+            <label className="flex items-center gap-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3 text-sm text-amber-900">
+              <input type="checkbox" checked={settings.enableLogging} onChange={(e) => setSettings({ ...settings, enableLogging: e.target.checked })} className="accent-orange-500" />
               启用日志
             </label>
             <div className="space-y-2">
@@ -277,26 +279,46 @@ export function ConfigurationPanel() {
           </div>
 
           <div className="space-y-2">
-            <Label>黑名单规则</Label>
+            <Label>域名过滤模式</Label>
+            <select
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={settings.filterMode}
+              onChange={(e) => setSettings({ ...settings, filterMode: e.target.value as SettingsData['filterMode'] })}
+            >
+              <option value="off">关闭过滤（所有域名都走 DoH）</option>
+              <option value="blacklist">黑名单：命中规则的域名不走 DoH</option>
+              <option value="whitelist">白名单：仅命中规则的域名走 DoH</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              被过滤的域名会返回 REFUSED，浏览器自动回退到系统 DNS，不影响其他网页加载。
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>过滤规则</Label>
             <Textarea
               value={blocklistText}
               onChange={(e) => setBlocklistText(e.target.value)}
               placeholder="每行一条，例如：ads.example.com、.tracking.example、*.bad.example"
               className="min-h-28 font-mono text-sm"
+              disabled={settings.filterMode === 'off'}
             />
-            <p className="text-xs text-muted-foreground">支持精确域名、后缀规则和简单通配符。</p>
+            <p className="text-xs text-muted-foreground">
+              支持精确域名、`.后缀`（匹配该域名及子域）和 `*.` 通配符。
+              {settings.filterMode === 'whitelist' && ' 注意：白名单模式下规则为空将拒绝所有域名！'}
+            </p>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="border-blue-100 shadow-md">
+      <Card className="border-orange-100 shadow-soft">
         <CardHeader>
-          <CardTitle className="text-blue-900 text-base sm:text-lg">上游 DNS 服务器</CardTitle>
+          <CardTitle className="text-amber-900 text-base sm:text-lg">上游 DNS 服务器</CardTitle>
           <CardDescription>按策略顺序尝试，失败时自动 fallback 到下一个上游</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {settings.upstreamServers.map((server, index) => (
-            <div key={index} className="space-y-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+            <div key={index} className="space-y-3 rounded-xl border border-orange-100 bg-orange-50/50 p-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>名称</Label>
@@ -312,25 +334,25 @@ export function ConfigurationPanel() {
                 <Input value={server.url} onChange={(e) => updateServer(index, { url: e.target.value })} />
               </div>
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-blue-900">
-                  <input type="checkbox" checked={server.enabled} onChange={(e) => updateServer(index, { enabled: e.target.checked })} />
+                <label className="flex items-center gap-2 text-sm text-amber-900">
+                  <input type="checkbox" checked={server.enabled} onChange={(e) => updateServer(index, { enabled: e.target.checked })} className="accent-orange-500" />
                   启用
                 </label>
-                <Button variant="ghost" size="sm" onClick={() => removeServer(index)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                <Button variant="ghost" size="sm" onClick={() => removeServer(index)} className="text-rose-500 hover:text-rose-600 hover:bg-rose-50">
                   <Trash2 className="w-4 h-4 mr-1" />
                   删除
                 </Button>
               </div>
             </div>
           ))}
-          <Button variant="outline" onClick={addServer} className="w-full border-dashed border-blue-300 hover:bg-blue-50">
+          <Button variant="outline" onClick={addServer} className="w-full border-dashed border-orange-300 hover:bg-orange-50 rounded-xl">
             <Plus className="w-4 h-4 mr-2" />
             添加上游 DNS 服务器
           </Button>
         </CardContent>
       </Card>
 
-      <Button onClick={saveDNSSettings} disabled={isSaving} className="w-full bg-blue-500 hover:bg-blue-600">
+      <Button onClick={saveDNSSettings} disabled={isSaving} className="w-full bg-orange-400 hover:bg-orange-500 rounded-full">
         <Save className="w-4 h-4 mr-2" />
         {isSaving ? '保存中...' : '保存 DNS 配置'}
       </Button>

@@ -4,6 +4,9 @@ export type DNSQueryStatus = 'success' | 'error' | 'timeout' | 'blocked';
 
 export type UpstreamPolicy = 'priority' | 'round-robin';
 
+// 域名过滤模式喵~ off=不过滤 blacklist=命中规则即拒绝 whitelist=仅放行命中域名 (ฅ'ω'ฅ)
+export type DNSFilterMode = 'off' | 'blacklist' | 'whitelist';
+
 export interface DNSQueryLog {
   id: string;
   timestamp: number;
@@ -55,6 +58,7 @@ export interface DNSServerSettings {
   maxLogEntries: number;
   rateLimit: number;
   blocklist: string[];
+  filterMode: DNSFilterMode;
   upstreamPolicy: UpstreamPolicy;
   upstreamTimeout: number;
 }

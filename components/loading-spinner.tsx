@@ -6,6 +6,6 @@ export function LoadingSpinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   };
 
   return (
-    <div className={`${sizeClasses[size]} border-blue-500 border-t-transparent rounded-full animate-spin`} />
+    <div className={`${sizeClasses[size]} border-orange-400 border-t-transparent rounded-full animate-spin`} />
   );
 }

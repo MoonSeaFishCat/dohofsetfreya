@@ -94,9 +94,10 @@ export class DoHService {
     return settingsStore.getDNSSettings();
   }
 
-  private isBlocked(domain: string, blocklist: string[]): boolean {
+  // 域名规则匹配喵~ 支持精确域名、.后缀 和 *.通配 三种写法 (ฅ'ω'ฅ)
+  private matchesDomainRule(domain: string, rules: string[]): boolean {
     const normalized = normalizeDomain(domain);
-    return blocklist.some((rule) => {
+    return rules.some((rule) => {
       const normalizedRule = normalizeDomain(rule);
       if (!normalizedRule) return false;
       if (normalizedRule.startsWith('*.')) {
@@ -116,6 +117,14 @@ export class DoHService {
       }
       return normalized === normalizedRule;
     });
+  }
+
+  // 过滤判定喵~ 白名单=只放行命中的小可爱，黑名单=命中的统统拦下 (◕‿◕)
+  // 拒绝时返回 REFUSED，浏览器会自动回退到系统 DNS，不影响其他网页加载~
+  private shouldRefuse(domain: string, settings: DNSServerSettings): boolean {
+    if (settings.filterMode === 'off') return false;
+    const matched = this.matchesDomainRule(domain, settings.blocklist);
+    return settings.filterMode === 'whitelist' ? !matched : matched;
   }
 
   private checkRateLimit(clientIp: string, limit: number): boolean {
@@ -199,7 +208,7 @@ export class DoHService {
         throw new Error('域名不能为空');
       }
 
-      if (this.isBlocked(normalizedDomain, settings.blocklist)) {
+      if (this.shouldRefuse(normalizedDomain, settings)) {
         const result: DNSQueryResult = {
           success: false,
           domain: normalizedDomain,
@@ -208,7 +217,7 @@ export class DoHService {
           responseTime: Date.now() - startTime,
           cached: false,
           blocked: true,
-          error: '域名已被黑名单拦截',
+          error: '域名已被过滤规则拦截',
         };
 
         if (options.log) {
@@ -356,7 +365,7 @@ export class DoHService {
       domain = normalizeDomain(question.name);
       recordType = toDNSRecordType(question.type);
 
-      if (this.isBlocked(domain, settings.blocklist)) {
+      if (this.shouldRefuse(domain, settings)) {
         this.logQuery(settings, {
           domain,
           type: recordType,

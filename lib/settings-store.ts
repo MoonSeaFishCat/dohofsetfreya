@@ -1,4 +1,4 @@
-import { DNSServerSettings, UpstreamDNS } from './dns-types';
+import { DNSFilterMode, DNSServerSettings, UpstreamDNS } from './dns-types';
 import { hasRedisConfig, getRedis } from './redis';
 
 interface AuthCredentials {
@@ -50,6 +50,14 @@ function readUpstreamPolicyEnv(): 'priority' | 'round-robin' {
   return process.env.DNS_UPSTREAM_POLICY === 'round-robin' ? 'round-robin' : 'priority';
 }
 
+// 读取过滤模式环境变量喵~ 默认 blacklist 保持原有黑名单语义 (๑•̀ㅂ•́)و✧
+function readFilterModeEnv(): DNSFilterMode {
+  const value = (process.env.DNS_FILTER_MODE || '').toLowerCase();
+  return value === 'off' || value === 'whitelist' ? value : 'blacklist';
+}
+
+const FILTER_MODES: readonly DNSFilterMode[] = ['off', 'blacklist', 'whitelist'];
+
 const DEFAULT_DNS_SETTINGS: Omit<DNSServerSettings, 'upstreamServers'> = {
   cacheEnabled: readBooleanEnv('DNS_CACHE_ENABLED', true),
   cacheTTL: readNumberEnv('DNS_CACHE_TTL', 300),
@@ -58,6 +66,7 @@ const DEFAULT_DNS_SETTINGS: Omit<DNSServerSettings, 'upstreamServers'> = {
   maxLogEntries: readNumberEnv('DNS_MAX_LOG_ENTRIES', 1000),
   rateLimit: readNumberEnv('DNS_RATE_LIMIT', 0),
   blocklist: readListEnv('DNS_BLOCKLIST'),
+  filterMode: readFilterModeEnv(),
   upstreamPolicy: readUpstreamPolicyEnv(),
   upstreamTimeout: readNumberEnv('DNS_UPSTREAM_TIMEOUT', 5000),
 };
@@ -120,6 +129,9 @@ function mergeDNSSettings(settings?: Partial<DNSServerSettings>): DNSServerSetti
     maxLogEntries: Math.max(100, Number(settings?.maxLogEntries || DEFAULT_DNS_SETTINGS.maxLogEntries)),
     rateLimit: Math.max(0, Number(settings?.rateLimit || DEFAULT_DNS_SETTINGS.rateLimit)),
     blocklist: normalizeBlocklist(settings?.blocklist || DEFAULT_DNS_SETTINGS.blocklist),
+    filterMode: settings?.filterMode && FILTER_MODES.includes(settings.filterMode)
+      ? settings.filterMode
+      : DEFAULT_DNS_SETTINGS.filterMode,
     upstreamPolicy: settings?.upstreamPolicy === 'round-robin' ? 'round-robin' : 'priority',
     upstreamTimeout: Math.min(15000, Math.max(1000, Number(settings?.upstreamTimeout || DEFAULT_DNS_SETTINGS.upstreamTimeout))),
   };

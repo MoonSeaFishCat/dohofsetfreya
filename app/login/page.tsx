@@ -48,10 +48,10 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 flex items-center justify-center p-3 sm:p-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-[#FFFBF6] to-rose-50/70 flex items-center justify-center p-3 sm:p-4">
       <AnimatedBackground />
-      
-      <Card className="w-full max-w-md relative z-10 shadow-xl border-blue-100">
+
+      <Card className="w-full max-w-md relative z-10 shadow-soft-lg border-orange-100">
         <CardHeader className="space-y-3 sm:space-y-4 text-center pb-2 sm:pb-4">
           <div className="flex justify-center">
             <div className="w-16 h-16 sm:w-20 sm:h-20 animate-float">
@@ -59,7 +59,7 @@ export default function LoginPage() {
             </div>
           </div>
           <div>
-            <CardTitle className="text-xl sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">
+            <CardTitle className="text-xl sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-amber-700 to-orange-400 bg-clip-text text-transparent">
               圣芙蕾雅学院
             </CardTitle>
             <CardDescription className="text-sm sm:text-base mt-1 sm:mt-2">
@@ -110,7 +110,7 @@ export default function LoginPage() {
 
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 h-10 sm:h-11"
+              className="w-full bg-gradient-to-r from-orange-400 to-amber-500 hover:from-orange-500 hover:to-amber-600 h-10 sm:h-11 rounded-full"
               disabled={loading}
             >
               {loading ? '登录中...' : '登录'}

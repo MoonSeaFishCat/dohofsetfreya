@@ -90,30 +90,30 @@ export function QueryLogs() {
 
   const getStatusIcon = (value: string) => {
     switch (value) {
-      case 'success': return <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 text-green-500" />;
-      case 'error': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-red-500" />;
-      case 'timeout': return <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500" />;
-      case 'blocked': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-red-500" />;
+      case 'success': return <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 text-emerald-500" />;
+      case 'error': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />;
+      case 'timeout': return <Clock className="w-3 h-3 sm:w-4 sm:h-4 text-amber-500" />;
+      case 'blocked': return <XCircle className="w-3 h-3 sm:w-4 sm:h-4 text-rose-400" />;
       default: return null;
     }
   };
 
   const getStatusBadge = (value: string) => {
     switch (value) {
-      case 'success': return <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">成功</Badge>;
-      case 'error': return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">失败</Badge>;
-      case 'timeout': return <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">超时</Badge>;
-      case 'blocked': return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">拦截</Badge>;
+      case 'success': return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">成功</Badge>;
+      case 'error': return <Badge className="bg-red-100 text-red-600 border-red-200 text-xs">失败</Badge>;
+      case 'timeout': return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs">超时</Badge>;
+      case 'blocked': return <Badge className="bg-rose-100 text-rose-600 border-rose-200 text-xs">拦截</Badge>;
       default: return <Badge variant="outline" className="text-xs">{value}</Badge>;
     }
   };
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <Card className="border-blue-100 shadow-md">
+      <Card className="border-orange-100 shadow-soft">
         <CardHeader className="p-3 sm:p-4 sm:pb-3">
-          <CardTitle className="flex items-center gap-2 text-blue-900 text-sm sm:text-base">
-            <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+          <CardTitle className="flex items-center gap-2 text-amber-900 text-sm sm:text-base">
+            <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
             查询日志
           </CardTitle>
           <CardDescription className="text-xs sm:text-sm">支持搜索、筛选和导出</CardDescription>
@@ -162,25 +162,25 @@ export function QueryLogs() {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-8"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
+            <div className="flex items-center justify-center py-8"><div className="animate-spin w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full" /></div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-8 text-blue-500">
+            <div className="text-center py-8 text-amber-500">
               <FileText className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 opacity-50" />
               <p className="text-sm">暂无查询日志</p>
             </div>
           ) : (
             <div className="space-y-2 max-h-[400px] sm:max-h-[500px] md:max-h-[600px] overflow-y-auto">
               {logs.map((log) => (
-                <div key={log.id} className="p-2 sm:p-3 bg-blue-50/50 rounded-lg border border-blue-100 hover:bg-blue-50 transition-colors">
+                <div key={log.id} className="p-2 sm:p-3 bg-orange-50/50 rounded-xl border border-orange-100 hover:bg-orange-50 transition-colors">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <Badge variant="outline" className="bg-blue-50 text-xs shrink-0">{log.type}</Badge>
-                        <span className="font-medium text-blue-900 text-xs sm:text-sm truncate">{log.domain}</span>
+                        <Badge variant="outline" className="bg-orange-50 text-xs shrink-0">{log.type}</Badge>
+                        <span className="font-medium text-amber-900 text-xs sm:text-sm truncate">{log.domain}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-blue-600">
+                      <div className="flex items-center gap-2 text-xs text-amber-700/80">
                         <span>{formatTimestamp(log.timestamp)}</span>
-                        {log.cached && <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">缓存</Badge>}
+                        {log.cached && <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">缓存</Badge>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -188,7 +188,7 @@ export function QueryLogs() {
                       {getStatusBadge(log.status)}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-blue-600">
+                  <div className="flex items-center gap-3 mt-2 text-xs text-amber-700/80">
                     <Badge variant="secondary" className="text-xs">{log.responseTime}ms</Badge>
                     {log.upstream && <span className="truncate hidden sm:inline">{log.upstream}</span>}
                     <span className="truncate hidden md:inline">{log.clientIp}</span>
@@ -201,17 +201,17 @@ export function QueryLogs() {
       </Card>
 
       <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-3">
-        <Card className="border-blue-100 bg-gradient-to-br from-blue-50 to-white">
-          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-blue-900">当前页总数</CardTitle></CardHeader>
-          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-blue-600">{filteredSummary.total}</div></CardContent>
+        <Card className="border-orange-100 bg-gradient-to-br from-orange-50 to-[#FFFCF8] shadow-soft">
+          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-amber-900">当前页总数</CardTitle></CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-orange-500">{filteredSummary.total}</div></CardContent>
         </Card>
-        <Card className="border-green-100 bg-gradient-to-br from-green-50 to-white">
-          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-green-900">成功数</CardTitle></CardHeader>
-          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-green-600">{filteredSummary.success}</div></CardContent>
+        <Card className="border-emerald-100 bg-gradient-to-br from-emerald-50 to-[#FFFCF8] shadow-soft">
+          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-emerald-900">成功数</CardTitle></CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-emerald-600">{filteredSummary.success}</div></CardContent>
         </Card>
-        <Card className="border-purple-100 bg-gradient-to-br from-purple-50 to-white">
-          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-purple-900">缓存命中</CardTitle></CardHeader>
-          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-purple-600">{filteredSummary.cachedCount}</div></CardContent>
+        <Card className="border-rose-100 bg-gradient-to-br from-rose-50 to-[#FFFCF8] shadow-soft">
+          <CardHeader className="pb-1 sm:pb-2 p-3 sm:p-4"><CardTitle className="text-xs sm:text-sm text-rose-900">缓存命中</CardTitle></CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0"><div className="text-xl sm:text-2xl font-bold text-rose-500">{filteredSummary.cachedCount}</div></CardContent>
         </Card>
       </div>
     </div>
