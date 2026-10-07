@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   blocklist: [],
   filterMode: 'blacklist',
   filterAction: 'refuse',
-  directResolver: 'udp://223.5.5.5',
+  directResolver: 'auto',
   fakeIpRules: [],
   fakeIpAddress: '198.18.0.1',
   upstreamPolicy: 'priority',
@@ -323,10 +323,10 @@ export function ConfigurationPanel() {
               <Input
                 value={settings.directResolver}
                 onChange={(e) => setSettings({ ...settings, directResolver: e.target.value })}
-                placeholder="udp://223.5.5.5"
+                placeholder="auto（跟随系统 DNS）"
               />
               <p className="text-xs text-muted-foreground">
-                支持 <code>udp://IP[:端口]</code>（明文 DNS，等价本地解析）或 <code>https://.../dns-query</code>（另一组 DoH）。
+                <code>auto</code> 跟随系统 DNS（等价本机浏览器当前在用的解析器），也支持 <code>udp://IP[:端口]</code> 明文 DNS 或 <code>https://.../dns-query</code>。
               </p>
             </div>
           )}

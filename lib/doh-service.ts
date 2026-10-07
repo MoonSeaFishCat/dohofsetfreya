@@ -1,4 +1,5 @@
 import dnsPacket from 'dns-packet';
+import dns from 'node:dns';
 import { createSocket } from 'dgram';
 import { DNSRecordType, DNSQueryLog, DNSQueryResult, DNSServerSettings, UpstreamDNS } from './dns-types';
 import { dnsCache } from './dns-cache';
@@ -107,6 +108,18 @@ function createFakeIpResponse(packet: any, question: any, fakeIp: string, isAAAA
   } as any));
 }
 
+// 解析 UDP 直连目标喵~ 兼容 "1.1.1.1"、"1.1.1.1:5353"、"[::1]:53"、"::1"、"udp://1.1.1.1" (ฅ'ω'ฅ)
+function parseUdpTarget(target: string): { host: string; port: number } {
+  const raw = target.replace(/^udp:\/\//, '');
+  const bracketed = raw.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracketed) return { host: bracketed[1], port: Number(bracketed[2]) || 53 };
+  const lastColon = raw.lastIndexOf(':');
+  if (lastColon > 0 && raw.indexOf(':') === lastColon) {
+    return { host: raw.slice(0, lastColon), port: Number(raw.slice(lastColon + 1)) || 53 };
+  }
+  return { host: raw, port: 53 };
+}
+
 export class DoHService {
   private roundRobinCursor = 0;
   private rateLimitBuckets: Map<string, RateLimitBucket> = new Map();
@@ -207,32 +220,46 @@ export class DoHService {
     throw lastError instanceof Error ? lastError : new Error('所有上游DNS服务器均不可用');
   }
 
-  // 直连解析喵~ udp:// 走明文 DNS（等价本地解析器），https:// 走指定 DoH (ง •̀_•́)ง
+  // 直连解析喵~ auto 跟随系统DNS（等价本机浏览器当前解析），udp:// 明文DNS，https:// 指定DoH (ง •̀_•́)ง
   private async forwardDirect(query: Buffer, resolver: string, timeout: number): Promise<Buffer> {
-    if (resolver.startsWith('udp://')) {
-      const url = new URL(resolver);
-      return this.resolveViaUdp(query, url.hostname, Number(url.port) || 53, timeout);
+    // auto 模式喵：读取操作系统配置的 DNS 列表逐个尝试，去不掉带 zone 的链路本地地址 (๑•̀ㅂ•́)و✧
+    const targets = resolver === 'auto'
+      ? dns.getServers().map((server) => server.split('%')[0]).filter(Boolean)
+      : [resolver];
+
+    let lastError: unknown;
+    for (const target of targets) {
+      try {
+        if (target.startsWith('https://')) {
+          const response = await fetch(target, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/dns-message',
+              'Accept': 'application/dns-message',
+            },
+            body: query,
+            signal: AbortSignal.timeout(timeout),
+          });
+          if (!response.ok) {
+            throw new Error(`直连解析器返回错误: ${response.status}`);
+          }
+          return Buffer.from(await response.arrayBuffer());
+        }
+
+        const { host, port } = parseUdpTarget(target);
+        return await this.resolveViaUdp(query, host, port, timeout);
+      } catch (error) {
+        lastError = error;
+        console.error(`[doh-service] Direct resolver failed: ${target}`, error);
+      }
     }
 
-    const response = await fetch(resolver, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/dns-message',
-        'Accept': 'application/dns-message',
-      },
-      body: query,
-      signal: AbortSignal.timeout(timeout),
-    });
-
-    if (!response.ok) {
-      throw new Error(`直连解析器返回错误: ${response.status}`);
-    }
-    return Buffer.from(await response.arrayBuffer());
+    throw lastError instanceof Error ? lastError : new Error('没有可用的直连解析器');
   }
 
   private resolveViaUdp(query: Buffer, host: string, port: number, timeout: number): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const socket = createSocket('udp4');
+      const socket = createSocket(host.includes(':') ? 'udp6' : 'udp4');
       const timer = setTimeout(() => {
         socket.close();
         reject(new Error('直连 DNS 查询超时'));

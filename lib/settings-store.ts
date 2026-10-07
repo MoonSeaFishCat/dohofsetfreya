@@ -65,12 +65,12 @@ const FILTER_MODES: readonly DNSFilterMode[] = ['off', 'blacklist', 'whitelist']
 const FILTER_ACTIONS: readonly DNSFilterAction[] = ['refuse', 'direct'];
 
 const DEFAULT_FAKE_IP = '198.18.0.1';
-const DEFAULT_DIRECT_RESOLVER = 'udp://223.5.5.5';
+const DEFAULT_DIRECT_RESOLVER = 'auto';
 
-// 校验直连解析器喵~ 支持 udp://IP[:端口] 或 https://.../dns-query，乱写就打回默认 (・ω<)
+// 校验直连解析器喵~ auto=跟随系统DNS（等价本机浏览器当前解析），另支持 udp://IP[:端口] 与 https://.../dns-query (・ω<)
 function normalizeDirectResolver(value?: string): string {
   const raw = (value || '').trim();
-  if (!raw) return DEFAULT_DIRECT_RESOLVER;
+  if (!raw || raw === 'auto' || raw === 'system') return DEFAULT_DIRECT_RESOLVER;
   const withScheme = raw.includes('://') ? raw : `udp://${raw}`;
   try {
     const url = new URL(withScheme);
