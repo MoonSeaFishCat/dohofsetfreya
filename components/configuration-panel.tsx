@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Plus, Save, Settings, Shield, Trash2, User } from 'lucide-react';
+import { Gauge, Plus, Save, Settings, Shield, Trash2, User } from 'lucide-react';
 
 interface UpstreamServer {
   name: string;
@@ -36,6 +36,19 @@ interface SettingsData {
   upstreamPolicy: 'priority' | 'round-robin';
   upstreamTimeout: number;
 }
+
+// 常用直连解析器预设喵~ 选完还能在输入框里继续手改 (๑•̀ㅂ•́)و✧
+const DIRECT_RESOLVER_PRESETS = [
+  { value: 'auto', label: 'auto · 跟随系统 DNS（推荐）' },
+  { value: 'udp://223.5.5.5', label: '阿里 DNS · udp://223.5.5.5' },
+  { value: 'udp://119.29.29.29', label: '腾讯 DNSPod · udp://119.29.29.29' },
+  { value: 'udp://114.114.114.114', label: '114 DNS · udp://114.114.114.114' },
+  { value: 'udp://1.1.1.1', label: 'Cloudflare · udp://1.1.1.1' },
+  { value: 'udp://8.8.8.8', label: 'Google · udp://8.8.8.8' },
+  { value: 'https://223.5.5.5/dns-query', label: '阿里 DoH · 223.5.5.5' },
+  { value: 'https://doh.pub/dns-query', label: '腾讯 DoH · doh.pub' },
+  { value: 'https://dns.google/dns-query', label: 'Google DoH · dns.google' },
+];
 
 const DEFAULT_SETTINGS: SettingsData = {
   upstreamServers: [],
@@ -67,6 +80,9 @@ export function ConfigurationPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  // 直连解析器测速结果喵~ key 是 resolver 值，null 表示超时/失败 (´･ω･`)
+  const [resolverLatency, setResolverLatency] = useState<Record<string, number | null>>({});
+  const [testingResolvers, setTestingResolvers] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -117,6 +133,37 @@ export function ConfigurationPanel() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // 批量测速喵~ 预设全测一遍，自定义值也捎上 (๑>◡<๑)
+  const testResolvers = async () => {
+    setTestingResolvers(true);
+    try {
+      const targets = [...new Set([...DIRECT_RESOLVER_PRESETS.map((p) => p.value), settings.directResolver].filter(Boolean))];
+      const response = await fetch('/api/test-resolver', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolvers: targets }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '测速失败');
+      const map: Record<string, number | null> = {};
+      for (const item of data.results || []) {
+        map[item.resolver] = item.ok ? item.latency : null;
+      }
+      setResolverLatency(map);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '测速失败');
+    } finally {
+      setTestingResolvers(false);
+    }
+  };
+
+  const latencyLabel = (value: string) => {
+    const latency = resolverLatency[value];
+    if (latency === undefined) return '';
+    return latency === null ? ' · ✗超时' : ` · ${latency}ms`;
   };
 
   const saveAuth = async () => {
@@ -318,15 +365,43 @@ export function ConfigurationPanel() {
             </div>
           </div>
           {settings.filterMode !== 'off' && settings.filterAction === 'direct' && (
-            <div className="space-y-2 max-w-md">
+            <div className="space-y-2">
               <Label>直连解析器</Label>
-              <Input
-                value={settings.directResolver}
-                onChange={(e) => setSettings({ ...settings, directResolver: e.target.value })}
-                placeholder="auto（跟随系统 DNS）"
-              />
+              <div className="flex flex-col sm:flex-row gap-2 max-w-2xl">
+                <select
+                  className="h-10 sm:w-72 shrink-0 rounded-md border border-input bg-background px-3 text-sm"
+                  value={DIRECT_RESOLVER_PRESETS.some((p) => p.value === settings.directResolver) ? settings.directResolver : 'custom'}
+                  onChange={(e) => {
+                    if (e.target.value !== 'custom') {
+                      setSettings({ ...settings, directResolver: e.target.value });
+                    }
+                  }}
+                >
+                  {DIRECT_RESOLVER_PRESETS.map((preset) => (
+                    <option key={preset.value} value={preset.value}>{preset.label}{latencyLabel(preset.value)}</option>
+                  ))}
+                  <option value="custom">自定义…{latencyLabel(settings.directResolver)}</option>
+                </select>
+                <Input
+                  className="flex-1"
+                  value={settings.directResolver}
+                  onChange={(e) => setSettings({ ...settings, directResolver: e.target.value })}
+                  placeholder="auto 或 udp://223.5.5.5 或 https://…/dns-query"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-10 shrink-0"
+                  onClick={testResolvers}
+                  disabled={testingResolvers}
+                >
+                  <Gauge className="w-4 h-4 mr-1" />
+                  {testingResolvers ? '测速中…' : '测速'}
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
-                <code>auto</code> 跟随系统 DNS（等价本机浏览器当前在用的解析器），也支持 <code>udp://IP[:端口]</code> 明文 DNS 或 <code>https://.../dns-query</code>。
+                <code>auto</code> 跟随系统 DNS（等价本机浏览器当前在用的解析器）；也可选预设或直接手填 <code>udp://IP[:端口]</code> / <code>https://.../dns-query</code>。
               </p>
             </div>
           )}

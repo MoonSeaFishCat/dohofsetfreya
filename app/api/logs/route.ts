@@ -29,12 +29,13 @@ function filterLogs(logs: DNSQueryLog[], request: NextRequest): DNSQueryLog[] {
 }
 
 function toCsv(logs: DNSQueryLog[]): string {
-  const headers = ['timestamp', 'domain', 'type', 'status', 'cached', 'responseTime', 'upstream', 'clientIp'];
+  const headers = ['timestamp', 'domain', 'type', 'status', 'rcode', 'cached', 'responseTime', 'upstream', 'clientIp'];
   const rows = logs.map((log) => [
     new Date(log.timestamp).toISOString(),
     log.domain,
     log.type,
     log.status,
+    log.rcode || '',
     String(log.cached),
     String(log.responseTime),
     log.upstream || '',

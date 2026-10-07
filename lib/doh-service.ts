@@ -16,6 +16,18 @@ const SUPPORTED_RECORD_TYPES = new Set<DNSRecordType>([
   'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'PTR', 'SRV', 'CAA', 'HTTPS', 'SVCB',
 ]);
 
+// dns-packet 不认识 HTTPS/SVCB 喵~ 编码时要写成 UNKNOWN_65/64 才能得到正确 qtype (´･ω･`)
+const ENCODE_TYPE_ALIASES: Partial<Record<DNSRecordType, string>> = {
+  HTTPS: 'UNKNOWN_65',
+  SVCB: 'UNKNOWN_64',
+};
+
+// 反过来喵~ 上游回来的 HTTPS/SVCB 会被解码成 UNKNOWN_65/64，日志统计要换回语义名 (◕‿◕)
+const DECODE_TYPE_ALIASES: Record<string, DNSRecordType> = {
+  UNKNOWN_65: 'HTTPS',
+  UNKNOWN_64: 'SVCB',
+};
+
 type ForwardResult = {
   upstream: UpstreamDNS;
   buffer: Buffer;
@@ -51,6 +63,7 @@ function answerToString(answer: any): string {
   if (answer.type === 'A' || answer.type === 'AAAA' || answer.type === 'CNAME' || answer.type === 'NS') return String(answer.data);
   if (answer.type === 'MX') return `${answer.priority} ${answer.exchange}`;
   if (answer.type === 'TXT') return Array.isArray(answer.data) ? answer.data.join(' ') : String(answer.data);
+  if (Buffer.isBuffer(answer.data)) return answer.data.toString('hex');
   return JSON.stringify(answer.data);
 }
 
@@ -67,7 +80,9 @@ function createDNSQuery(domain: string, recordType: DNSRecordType): Buffer {
     type: 'query',
     id: Math.floor(Math.random() * 65535),
     flags: dnsPacket.RECURSION_DESIRED,
-    questions: [{ type: recordType, name: domain }],
+    questions: [{ type: ENCODE_TYPE_ALIASES[recordType] ?? recordType, name: domain }],
+    // 带上 EDNS 喵~ 不然 UDP 直连收到大于 512 字节的应答（比如带 ECH 的 HTTPS 记录）会被截断 (´･ω･`)
+    additionals: [{ type: 'OPT', name: '.', udpPayloadSize: 4096, flags: 0, options: [] }],
   } as any));
 }
 
@@ -91,9 +106,10 @@ function createCachedResponse(packet: any, question: any, answers: any[]): Buffe
   } as any));
 }
 
-// SNI 阻断代答喵~ A 查询回虚拟 IP 给本地代理嗅探接管；AAAA 回空让客户端走 IPv4 (๑•̀ㅂ•́)و✧
-function createFakeIpResponse(packet: any, question: any, fakeIp: string, isAAAA: boolean): Buffer {
-  const answers = isAAAA ? [] : [{
+// SNI 阻断代答喵~ A 查询回虚拟 IP 给本地代理嗅探接管；AAAA/HTTPS/SVCB 回空
+// —— 重点是把 ECH 也掐掉喵！不然浏览器连 fake-ip 时外层 SNI 是公共名，代理就嗅探不到真实域名了 (´；ω；`)
+function createFakeIpResponse(packet: any, question: any, fakeIp: string, empty: boolean): Buffer {
+  const answers = empty ? [] : [{
     type: 'A',
     name: question.name,
     ttl: FAKE_IP_TTL,
@@ -174,6 +190,12 @@ export class DoHService {
     }
 
     bucket.count += 1;
+    // 顺手清扫过期桶喵~ 不然公开部署时 Map 会按 IP 无限膨胀 (・ω<)
+    if (this.rateLimitBuckets.size > 5000) {
+      for (const [ip, b] of this.rateLimitBuckets) {
+        if (now - b.windowStart >= RATE_LIMIT_WINDOW_MS) this.rateLimitBuckets.delete(ip);
+      }
+    }
     return bucket.count <= limit;
   }
 
@@ -221,7 +243,8 @@ export class DoHService {
   }
 
   // 直连解析喵~ auto 跟随系统DNS（等价本机浏览器当前解析），udp:// 明文DNS，https:// 指定DoH (ง •̀_•́)ง
-  private async forwardDirect(query: Buffer, resolver: string, timeout: number): Promise<Buffer> {
+  // 返回实际命中的 target，方便日志看清 auto 模式到底用了谁 (◕‿◕)
+  private async forwardDirect(query: Buffer, resolver: string, timeout: number): Promise<{ buffer: Buffer; target: string }> {
     // auto 模式喵：读取操作系统配置的 DNS 列表逐个尝试，去不掉带 zone 的链路本地地址 (๑•̀ㅂ•́)و✧
     const targets = resolver === 'auto'
       ? dns.getServers().map((server) => server.split('%')[0]).filter(Boolean)
@@ -243,11 +266,12 @@ export class DoHService {
           if (!response.ok) {
             throw new Error(`直连解析器返回错误: ${response.status}`);
           }
-          return Buffer.from(await response.arrayBuffer());
+          return { buffer: Buffer.from(await response.arrayBuffer()), target };
         }
 
         const { host, port } = parseUdpTarget(target);
-        return await this.resolveViaUdp(query, host, port, timeout);
+        const buffer = await this.resolveViaUdp(query, host, port, timeout);
+        return { buffer, target };
       } catch (error) {
         lastError = error;
         console.error(`[doh-service] Direct resolver failed: ${target}`, error);
@@ -260,19 +284,30 @@ export class DoHService {
   private resolveViaUdp(query: Buffer, host: string, port: number, timeout: number): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const socket = createSocket(host.includes(':') ? 'udp6' : 'udp4');
+      const requestId = (dnsPacket.decode(query) as any).id;
+      // 幂等关闭喵~ close() 两次会抛错，包一层保险 (´･ω･`)
+      const close = () => { try { socket.close(); } catch { /* 已关闭 */ } };
       const timer = setTimeout(() => {
-        socket.close();
+        close();
         reject(new Error('直连 DNS 查询超时'));
       }, timeout);
       socket.once('error', (error) => {
         clearTimeout(timer);
-        socket.close();
+        close();
         reject(error);
       });
       socket.once('message', (msg) => {
         clearTimeout(timer);
-        socket.close();
-        resolve(Buffer.from(msg));
+        close();
+        try {
+          // 校验响应 ID 喵~ UDP 是无连接的，收到串包不能直接用 (・ω<)
+          if ((dnsPacket.decode(msg) as any).id !== requestId) {
+            return reject(new Error('直连 DNS 响应 ID 不匹配'));
+          }
+          resolve(Buffer.from(msg));
+        } catch (error) {
+          reject(error);
+        }
       });
       socket.send(query, port, host);
     });
@@ -302,9 +337,9 @@ export class DoHService {
         throw new Error('域名不能为空');
       }
 
-      // SNI 阻断代答喵~ 显式名单优先于过滤动作 (๑>◡<๑)
+      // SNI 阻断代答喵~ 显式名单优先于过滤动作；HTTPS/SVCB 回空掐掉 ECH 保住嗅探 (๑>◡<๑)
       if (settings.fakeIpRules.length > 0
-        && (recordType === 'A' || recordType === 'AAAA')
+        && ['A', 'AAAA', 'HTTPS', 'SVCB'].includes(recordType)
         && this.matchesDomainRule(normalizedDomain, settings.fakeIpRules)) {
         const fakeAnswers = recordType === 'A'
           ? [{ type: 'A', name: normalizedDomain, ttl: FAKE_IP_TTL, data: settings.fakeIpAddress }]
@@ -327,6 +362,7 @@ export class DoHService {
             responseTime: result.responseTime,
             status: 'fakeip',
             cached: false,
+            rcode: 'NOERROR',
             answers: fakeAnswers.map((answer) => String(answer.data)),
           });
         }
@@ -355,6 +391,7 @@ export class DoHService {
             responseTime: result.responseTime,
             status: 'blocked',
             cached: false,
+            rcode: 'REFUSED',
           });
         }
 
@@ -381,6 +418,7 @@ export class DoHService {
               responseTime: result.responseTime,
               status: 'success',
               cached: true,
+              rcode: 'NOERROR',
               answers: cached.answers.map(answerToString),
             });
           }
@@ -397,7 +435,9 @@ export class DoHService {
       // 分流喵~ 命中过滤的域名走直连解析器，失败自动回退上游兜底 (◕‿◕)
       if (disposition === 'direct') {
         try {
-          buffer = await this.forwardDirect(queryBuffer, settings.directResolver, settings.upstreamTimeout);
+          const direct = await this.forwardDirect(queryBuffer, settings.directResolver, settings.upstreamTimeout);
+          buffer = direct.buffer;
+          upstreamName = direct.target;
         } catch (error) {
           console.error('[doh-service] Direct resolver failed, fallback to upstream:', error);
         }
@@ -441,6 +481,7 @@ export class DoHService {
           responseTime,
           status,
           cached: false,
+          rcode: packet.rcode || 'NOERROR',
           upstream: upstreamName,
           answers: answers.map(answerToString),
         });
@@ -461,6 +502,7 @@ export class DoHService {
           responseTime,
           status: isTimeout ? 'timeout' : 'error',
           cached: false,
+          rcode: 'SERVFAIL',
         });
       }
 
@@ -478,6 +520,21 @@ export class DoHService {
 
   async query(domain: string, type: DNSRecordType = 'A', useCache = true, clientIp = 'unknown'): Promise<DNSQueryResult> {
     return this.resolveQuery(domain, type, { useCache, clientIp, log: true });
+  }
+
+  // 直连解析器测速喵~ 发一个真实 A 查询计时，auto 模式顺便回传实际命中的服务器 (ง •̀_•́)ง
+  async testDirectResolver(resolver: string): Promise<{ ok: boolean; latency: number; target?: string; error?: string }> {
+    const start = Date.now();
+    try {
+      const { target } = await this.forwardDirect(createDNSQuery('www.qq.com', 'A'), resolver, 4000);
+      return { ok: true, latency: Date.now() - start, target };
+    } catch (error) {
+      return {
+        ok: false,
+        latency: Date.now() - start,
+        error: error instanceof Error ? error.message : '测试失败',
+      };
+    }
   }
 
   async handleDoHRequest(request: Request): Promise<Response> {
@@ -509,14 +566,15 @@ export class DoHService {
       }
 
       domain = normalizeDomain(question.name);
-      // 记录原始类型喵~ 未知类型照样转发上游，只是不进缓存防止串味 (ฅ'ω'ฅ)
+      // 记录类型喵~ HTTPS/SVCB 解出来是 UNKNOWN_65/64，先换回语义名再判定 (ฅ'ω'ฅ)
       const rawType = String(question.type || 'A').toUpperCase();
-      const isKnownType = SUPPORTED_RECORD_TYPES.has(rawType as DNSRecordType);
-      recordType = toDNSRecordType(rawType);
+      const semanticType = DECODE_TYPE_ALIASES[rawType] || rawType;
+      const isKnownType = SUPPORTED_RECORD_TYPES.has(semanticType as DNSRecordType);
+      recordType = toDNSRecordType(semanticType);
 
-      // SNI 阻断代答：命中规则的 A/AAAA 查询返回虚拟 IP，交给本地代理嗅探接管（优先于过滤动作）
+      // SNI 阻断代答：命中规则的 A 查询返回虚拟 IP；AAAA/HTTPS/SVCB 回空（掐 ECH 保住本地代理 SNI 嗅探）
       if (settings.fakeIpRules.length > 0
-        && (rawType === 'A' || rawType === 'AAAA')
+        && ['A', 'AAAA', 'HTTPS', 'SVCB'].includes(recordType)
         && this.matchesDomainRule(domain, settings.fakeIpRules)) {
         this.logQuery(settings, {
           domain,
@@ -525,10 +583,11 @@ export class DoHService {
           responseTime: Date.now() - startTime,
           status: 'fakeip',
           cached: false,
-          answers: rawType === 'A' ? [settings.fakeIpAddress] : [],
+          rcode: 'NOERROR',
+          answers: recordType === 'A' ? [settings.fakeIpAddress] : [],
         });
 
-        return new Response(createFakeIpResponse(packet, question, settings.fakeIpAddress, rawType === 'AAAA'), {
+        return new Response(createFakeIpResponse(packet, question, settings.fakeIpAddress, recordType !== 'A'), {
           status: 200,
           headers: {
             'Content-Type': 'application/dns-message',
@@ -546,6 +605,7 @@ export class DoHService {
           responseTime: Date.now() - startTime,
           status: 'blocked',
           cached: false,
+          rcode: 'REFUSED',
         });
 
         return new Response(createRefusedResponse(packet, question), {
@@ -566,6 +626,7 @@ export class DoHService {
           responseTime: Date.now() - startTime,
           status: 'success',
           cached: true,
+          rcode: 'NOERROR',
           answers: cached.answers.map(answerToString),
         });
 
@@ -585,7 +646,9 @@ export class DoHService {
       // 分流喵~ 命中过滤的域名走直连解析器，失败自动回退上游兜底 (◕‿◕)
       if (disposition === 'direct') {
         try {
-          buffer = await this.forwardDirect(dnsQuery, settings.directResolver, settings.upstreamTimeout);
+          const direct = await this.forwardDirect(dnsQuery, settings.directResolver, settings.upstreamTimeout);
+          buffer = direct.buffer;
+          upstreamName = direct.target;
         } catch (error) {
           console.error('[doh-service] Direct resolver failed, fallback to upstream:', error);
         }
@@ -618,6 +681,7 @@ export class DoHService {
         responseTime,
         status,
         cached: false,
+        rcode: responsePacket.rcode || 'NOERROR',
         upstream: upstreamName,
         answers: answers.map(answerToString),
       });
@@ -643,6 +707,7 @@ export class DoHService {
         responseTime: Date.now() - startTime,
         status: error instanceof DOMException && error.name === 'TimeoutError' ? 'timeout' : 'error',
         cached: false,
+        rcode: 'SERVFAIL',
       });
       return new Response('DNS查询失败', { status: 500 });
     }

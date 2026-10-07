@@ -21,6 +21,8 @@ export interface DNSQueryLog {
   cached: boolean;
   upstream?: string;
   answers?: string[];
+  // DNS 响应码喵~ NOERROR/REFUSED/NXDOMAIN/SERVFAIL 等，排查时超有用 (◕‿◕)
+  rcode?: string;
 }
 
 export interface DNSStats {

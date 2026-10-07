@@ -68,16 +68,18 @@ const DEFAULT_FAKE_IP = '198.18.0.1';
 const DEFAULT_DIRECT_RESOLVER = 'auto';
 
 // 校验直连解析器喵~ auto=跟随系统DNS（等价本机浏览器当前解析），另支持 udp://IP[:端口] 与 https://.../dns-query (・ω<)
-function normalizeDirectResolver(value?: string): string {
+// https 复用上游同款校验：禁止本机/本地域名，不然指回自己的 /api/dns-query 会无限自循环喵 (´；ω；`)
+// udp 放行任意地址：本机代理解析器（127.0.0.1:53 之类）是合法直连目标
+export function normalizeDirectResolver(value?: string): string {
   const raw = (value || '').trim();
   if (!raw || raw === 'auto' || raw === 'system') return DEFAULT_DIRECT_RESOLVER;
   const withScheme = raw.includes('://') ? raw : `udp://${raw}`;
   try {
     const url = new URL(withScheme);
     if (url.protocol === 'udp:' && url.hostname) return withScheme;
-    if (url.protocol === 'https:') return url.toString();
+    if (url.protocol === 'https:') return normalizeUrl(raw);
   } catch {
-    // 解析失败走默认值
+    // 解析失败或命中黑名单主机，打回默认值
   }
   return DEFAULT_DIRECT_RESOLVER;
 }
