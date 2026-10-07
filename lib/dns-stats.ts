@@ -1,5 +1,6 @@
 import { DNSQueryLog, DNSStats, DNSRecordType } from './dns-types';
 import { hasRedisConfig, getRedis } from './redis';
+import type Redis from 'ioredis';
 
 function hasKVConfig(): boolean {
   return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
@@ -37,7 +38,16 @@ class MemoryStatsManager {
     }
   }
 
+  // 过期日志清理喵~ 只清尾部比截止线还老的记录 (・ω<)
+  private pruneExpired(): void {
+    const cutoff = Date.now() - LOG_RETENTION_MS;
+    if (this.logs.length > 0 && this.logs[this.logs.length - 1].timestamp < cutoff) {
+      this.logs = this.logs.filter((log) => log.timestamp >= cutoff);
+    }
+  }
+
   getStats(): DNSStats {
+    this.pruneExpired();
     const avgResponseTime = this.successCount > 0
       ? this.totalResponseTime / this.successCount
       : 0;
@@ -60,6 +70,7 @@ class MemoryStatsManager {
   }
 
   getLogs(limit = 100, offset = 0): DNSQueryLog[] {
+    this.pruneExpired();
     return this.logs.slice(offset, offset + limit);
   }
 
@@ -91,6 +102,17 @@ const STORAGE_KEYS = {
 } as const;
 
 const MAX_LOGS = 1000;
+
+// 日志保留期喵~ 默认 7 天，可用 DNS_LOG_RETENTION_DAYS 调整 (◕‿◕)
+const LOG_RETENTION_MS = Math.max(1, Number(process.env.DNS_LOG_RETENTION_DAYS) || 7) * 24 * 3600 * 1000;
+const isFreshLog = (log: DNSQueryLog): boolean => Date.now() - log.timestamp < LOG_RETENTION_MS;
+const parseLog = (item: unknown): DNSQueryLog | null => {
+  try {
+    return typeof item === 'string' ? JSON.parse(item) : item as DNSQueryLog;
+  } catch {
+    return null;
+  }
+};
 
 class KVStatsManager {
   private kv: any = null;
@@ -189,13 +211,8 @@ class KVStatsManager {
       );
       const queryTypeDistribution = Object.fromEntries(typeEntries) as Record<DNSRecordType, number>;
 
-      const recentQueries: DNSQueryLog[] = (recentLogsRaw as string[]).map((raw) => {
-        try {
-          return typeof raw === 'string' ? JSON.parse(raw) : raw;
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
+      const recentQueries: DNSQueryLog[] = (recentLogsRaw as string[]).map(parseLog)
+        .filter((log): log is DNSQueryLog => !!log && isFreshLog(log));
 
       return {
         totalQueries,
@@ -220,17 +237,24 @@ class KVStatsManager {
     }
   }
 
+  // 懒清理喵~ 只瞄一眼最老那条，过期了才全量重写列表，平时成本 = 一次单元素查询 (・ω<)
+  private async pruneExpiredLogs(kv: any): Promise<void> {
+    const tail = (await kv.lrange(STORAGE_KEYS.LOGS, -1, -1)) as unknown[];
+    if (!tail?.length) return;
+    const oldest = parseLog(tail[0]);
+    if (oldest && isFreshLog(oldest)) return;
+    const all = (await kv.lrange(STORAGE_KEYS.LOGS, 0, -1)) as unknown[];
+    const fresh = all.map(parseLog).filter((log): log is DNSQueryLog => !!log && isFreshLog(log));
+    await kv.del(STORAGE_KEYS.LOGS);
+    if (fresh.length) await kv.rpush(STORAGE_KEYS.LOGS, ...fresh.map((log) => JSON.stringify(log)));
+  }
+
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
     try {
       const kv = await this.getKV();
+      await this.pruneExpiredLogs(kv);
       const raw = await kv.lrange(STORAGE_KEYS.LOGS, offset, offset + limit - 1);
-      return (raw as string[]).map((item) => {
-        try {
-          return typeof item === 'string' ? JSON.parse(item) : item;
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
+      return (raw as unknown[]).map(parseLog).filter((log): log is DNSQueryLog => !!log);
     } catch (error) {
       console.error('[dns-stats] KV getLogs error:', error);
       return [];
@@ -347,13 +371,8 @@ class RedisStatsManager {
       );
       const queryTypeDistribution = Object.fromEntries(typeEntries) as Record<DNSRecordType, number>;
 
-      const recentQueries: DNSQueryLog[] = recentLogsRaw.map((raw) => {
-        try {
-          return typeof raw === 'string' ? JSON.parse(raw) : raw;
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
+      const recentQueries: DNSQueryLog[] = recentLogsRaw.map(parseLog)
+        .filter((log): log is DNSQueryLog => !!log && isFreshLog(log));
 
       return {
         totalQueries,
@@ -378,17 +397,24 @@ class RedisStatsManager {
     }
   }
 
+  // 懒清理喵~ 只瞄一眼最老那条，过期了才全量重写列表 (・ω<)
+  private async pruneExpiredLogs(redis: Redis): Promise<void> {
+    const tail = await redis.lrange(STORAGE_KEYS.LOGS, -1, -1);
+    if (!tail.length) return;
+    const oldest = parseLog(tail[0]);
+    if (oldest && isFreshLog(oldest)) return;
+    const all = await redis.lrange(STORAGE_KEYS.LOGS, 0, -1);
+    const fresh = all.map(parseLog).filter((log): log is DNSQueryLog => !!log && isFreshLog(log));
+    await redis.del(STORAGE_KEYS.LOGS);
+    if (fresh.length) await redis.rpush(STORAGE_KEYS.LOGS, ...fresh.map((log) => JSON.stringify(log)));
+  }
+
   async getLogs(limit = 100, offset = 0): Promise<DNSQueryLog[]> {
     try {
       const redis = getRedis();
+      await this.pruneExpiredLogs(redis);
       const raw = await redis.lrange(STORAGE_KEYS.LOGS, offset, offset + limit - 1);
-      return raw.map((item) => {
-        try {
-          return typeof item === 'string' ? JSON.parse(item) : item;
-        } catch {
-          return null;
-        }
-      }).filter(Boolean);
+      return raw.map(parseLog).filter((log): log is DNSQueryLog => !!log);
     } catch (error) {
       console.error('[dns-stats] Redis getLogs error:', error);
       return [];

@@ -172,7 +172,7 @@ pnpm dev
 - 域名过滤模式：`off` 关闭过滤 / `blacklist` 命中规则的域名被过滤 / `whitelist` 仅命中规则的域名走 DoH
 - 命中动作：`refuse` 返回 REFUSED 彻底拦截 / `direct` 分流到直连解析器（普通 DNS 或另一组 DoH）
 - 直连解析器：`auto` 跟随系统 DNS（默认，等价本机浏览器当前解析器）/ `udp://IP[:端口]` 明文 DNS / `https://.../dns-query`，内置常用预设并支持一键延迟测速
-- 查询日志：状态/rcode/缓存/上游/耗时多维度展示，支持详情弹窗、自动刷新、筛选与 CSV 导出
+- 查询日志：状态/rcode/缓存/上游/耗时多维度展示，支持详情弹窗、自动刷新、筛选与 CSV 导出；日志默认保留 7 天自动清理（`DNS_LOG_RETENTION_DAYS` 可调）
 - 过滤规则：精确域名、`.example.com` 后缀和 `*.example.com` 通配规则
 - SNI 阻断代答：命中规则的域名 A 查询返回配置的虚拟 IP（默认 `198.18.0.1`）；AAAA/HTTPS/SVCB 返回空记录——后者是为了掐掉 ECH，否则浏览器用加密 SNI 连接 fake-ip，本地代理嗅探不到真实域名会路由失败
 - 日志开关、日志上限和限流参数
